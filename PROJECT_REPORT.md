@@ -43,8 +43,7 @@
 8. [Deployment Modes & Demonstration Guide](#8-deployment-modes--demonstration-guide)
    - [8.1 Mode A: 100% Offline Local LAN / Hotspot](#81-mode-a-100-offline-local-lan--hotspot)
    - [8.2 Mode B: 24/7 Global Cloud Web Service](#82-mode-b-247-global-cloud-web-service)
-9. [Viva / Examination Questions & Model Answers](#9-viva--examination-questions--model-answers)
-10. [Conclusion & Future Scope](#10-conclusion--future-scope)
+9. [Conclusion & Future Scope](#9-conclusion--future-scope)
 
 ---
 
@@ -160,7 +159,7 @@ With Simple LAN Chat 4-Byte Framing:
      {
        "type": "HEARTBEAT",
        "sender_id": "02aa8b74",
-       "sender_name": "Suraj",
+       "sender_name": "Alice",
        "payload": {
          "device_name": "Host-PC",
          "tcp_port": 50001,
@@ -364,28 +363,7 @@ Zero bit corruption or byte drift occurred.
 
 ---
 
-## 9. Viva / Examination Questions & Model Answers
-
-Here are the most common technical questions faculty ask during Computer Networks project reviews, along with their precise answers based on this implementation:
-
-#### Q1: Why did you use both TCP and UDP instead of just TCP?
-> **Answer:** TCP is a point-to-point protocol that requires a pre-existing IP address to initiate a 3-way handshake; it cannot broadcast. UDP supports broadcast addresses (`255.255.255.255`), allowing nodes to discover each other dynamically without a central server. However, UDP is unreliable, so for message delivery and file sharing where data loss is unacceptable, we switch to reliable, connection-oriented TCP streams.
-
-#### Q2: What is the "Sticky Packet" (Framing) problem in TCP, and how did you solve it?
-> **Answer:** TCP is a byte-stream protocol with no concept of message boundaries. Multiple small packets can be coalesced by Nagle's algorithm into a single buffer. We solved this in `src/network/framing.py` by prepending a 4-byte big-endian unsigned integer representing the payload length (`struct.pack("!I", len)`). The receiver reads 4 bytes first, extracts the length $N$, and reads exactly $N$ bytes, ensuring perfect message isolation.
-
-#### Q3: How do you verify that a transferred file is not corrupted?
-> **Answer:** Before sending, the sender computes a cryptographic hash of the entire file using the SHA-256 algorithm and includes this hash in the `FILE_REQUEST` packet. After the receiver writes all binary chunks to disk, it independently computes the SHA-256 hash of the received file. If the hashes match, the transfer is confirmed; otherwise, the file is rejected.
-
-#### Q4: Why is Tkinter paired with a background queue?
-> **Answer:** Tkinter's main event loop is single-threaded. If network socket operations (`socket.accept()`, `recv()`) run on the GUI thread, the user interface freezes. We run all network listener sockets on background daemon threads and pass incoming packets to the GUI using Python's thread-safe `queue.Queue()`, which the GUI polls safely every 40ms using `.after()`.
-
-#### Q5: What is AP Isolation and how does it affect LAN applications?
-> **Answer:** Access Point (AP) Isolation is a router security feature common in public, hotel, and hostel Wi-Fi networks. It prevents wireless clients from communicating directly with other wireless clients on the same subnet (blocking Layer 2/3 peer-to-peer traffic). We resolve this either by running on a Mobile Hotspot (which allows client-to-client traffic) or by routing through our Cloud Gateway.
-
----
-
-## 10. Conclusion & Future Scope
+## 9. Conclusion & Future Scope
 
 ### Conclusion
 The **Simple LAN Chat** project successfully demonstrates the practical implementation of core Computer Networks principles: low-level BSD socket programming, UDP broadcast presence detection, TCP length-prefix framing, cryptographic SHA-256 verification, thread synchronization, and cross-platform web bridging. The project operates with **zero external dependencies** and is fully validated with **37 passing unit and integration tests**.
@@ -398,6 +376,5 @@ The **Simple LAN Chat** project successfully demonstrates the practical implemen
 ---
 
 <p align="center">
-  <strong>Submitted for Computer Networks Laboratory Evaluation</strong><br>
-  Designed & Developed by Suraj Thakur
+  <strong>Submitted for Computer Networks Laboratory Evaluation</strong>
 </p>
