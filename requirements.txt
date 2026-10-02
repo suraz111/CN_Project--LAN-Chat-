@@ -1,0 +1,2 @@
+# Core Application dependencies (Python 3.10+ Standard Library based)
+# No external runtime dependencies strictly required for core app.
