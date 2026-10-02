@@ -237,9 +237,10 @@ def main() -> None:
         except Exception:
             pass
 
+    default_port = int(os.environ.get("PORT", 8080))
     parser = argparse.ArgumentParser(description="Simple LAN Chat — Standalone Web Gateway")
     parser.add_argument("--username", "-u", type=str, default=f"{socket.gethostname()}-Web", help="Display Name")
-    parser.add_argument("--port", "-p", type=int, default=8080, help="Web Interface HTTP Port (default: 8080)")
+    parser.add_argument("--port", "-p", type=int, default=default_port, help="Web Interface HTTP Port (default: 8080 or $PORT)")
     parser.add_argument("--tcp-port", "-t", type=int, default=config.DEFAULT_TCP_PORT, help="LAN TCP Port")
     args = parser.parse_args()
 
