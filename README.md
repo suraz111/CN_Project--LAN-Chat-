@@ -11,13 +11,24 @@
 </p>
 
 <p align="center">
-  <strong>A lightweight, zero-configuration Peer-to-Peer (P2P) desktop chat and file-sharing application designed for Local Area Networks (LAN), featuring a built-in mobile web interface.</strong>
+  <a href="https://cn-project-lan-chat.onrender.com" target="_blank">
+    <img src="https://img.shields.io/badge/🌐_Live_Demo-cn--project--lan--chat.onrender.com-00C7B7?style=for-the-badge&logo=render&logoColor=white" alt="Live Demo on Render">
+  </a>
+</p>
+
+<p align="center">
+  <strong>A lightweight, zero-configuration Peer-to-Peer (P2P) desktop chat and file-sharing application designed for Local Area Networks (LAN), featuring a 24/7 cloud gateway and mobile web client.</strong>
+</p>
+
+<p align="center">
+  🚀 <strong>Live Web App:</strong> <a href="https://cn-project-lan-chat.onrender.com">https://cn-project-lan-chat.onrender.com</a>
 </p>
 
 ---
 
 ## 📑 Table of Contents
 
+- [🌐 Live Online Demo (24/7 Access)](#-live-online-demo-247-access)
 - [🌟 Features Overview](#-features-overview)
 - [🏗️ Network Architecture & Protocols](#️-network-architecture--protocols)
   - [OSI Layer Implementation](#osi-layer-implementation)
@@ -33,6 +44,18 @@
 - [📂 Project Structure](#-project-structure)
 - [🧪 Automated Testing & Verification](#-automated-testing--verification)
 - [🏛️ Detailed Documentation](#️-detailed-documentation)
+
+---
+
+## 🌐 Live Online Demo (24/7 Access)
+
+You can try the live application right now without installing anything:
+
+👉 **[https://cn-project-lan-chat.onrender.com](https://cn-project-lan-chat.onrender.com)**
+
+- 📱 **Cross-Platform:** Works on any browser on **Android**, **iPhone**, **iPad**, **Windows**, **macOS**, and **Linux**.
+- ⚡ **Zero Installation:** Open the link $\rightarrow$ enter your display name $\rightarrow$ start chatting!
+- 💬 **Features Live Online:** Group broadcast room, 1-on-1 direct messaging, picture uploads, and light/dark Catppuccin themes.
 
 ---
 
@@ -113,7 +136,11 @@ To prevent **TCP stream concatenation** and **packet fragmentation**, all direct
 
 ## 📱 Mobile & Cross-Device Access
 
-You can connect your **Android phone**, **iPhone**, **iPad**, or another laptop on your Wi-Fi without installing anything:
+You can connect your **Android phone**, **iPhone**, **iPad**, or another laptop without installing anything:
+
+> [!NOTE]
+> **Global 24/7 Cloud Access:** You can instantly access the live cloud-hosted app from anywhere at **[https://cn-project-lan-chat.onrender.com](https://cn-project-lan-chat.onrender.com)**.  
+> Follow the steps below if you want to run your own **private offline local Wi-Fi LAN** instance.
 
 ### Connecting Your Phone
 
