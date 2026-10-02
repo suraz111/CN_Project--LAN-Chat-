@@ -21,16 +21,23 @@ def main() -> None:
     default_user = getpass.getuser()
 
     # Create temporary root to ask for username prompt if needed
-    root = tk.Tk()
-    root.withdraw()
+    try:
+        root = tk.Tk()
+        root.withdraw()
 
-    username = simpledialog.askstring(
-        "Simple LAN Chat — Login",
-        f"Enter your chat display name:",
-        initialvalue=default_user,
-    )
+        username = simpledialog.askstring(
+            "Simple LAN Chat — Login",
+            f"Enter your chat display name:",
+            initialvalue=default_user,
+        )
 
-    root.destroy()
+        root.destroy()
+    except (tk.TclError, Exception) as e:
+        print(f"[Notice] No graphical desktop display ($DISPLAY) detected ({e}).")
+        print(f"[Notice] Automatically switching to standalone Web Gateway...")
+        import web_main
+        web_main.main()
+        return
 
     if not username:
         username = default_user
