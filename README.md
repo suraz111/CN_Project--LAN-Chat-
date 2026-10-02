@@ -278,10 +278,11 @@ python -m unittest discover tests/
 
 For comprehensive academic and implementation details, refer to:
 
-- 📋 [BRAINSTORMING.md](file:///d:/CN_project/BRAINSTORMING.md) — Feature ideation, protocol selection & requirement analysis.
-- 🏗️ [DESIGN.md](file:///d:/CN_project/DESIGN.md) — Detailed class diagrams, state machines, packet schemas & wireframes.
-- 🛠️ [STACK.md](file:///d:/CN_project/STACK.md) — Technology stack specification, tooling choices & standard library rationale.
-- 🏛️ [ARCHITECTURE.md](file:///d:/CN_project/ARCHITECTURE.md) — OSI model mapping, sequence diagrams & concurrency thread models.
+- 📄 [PROJECT_REPORT.md](PROJECT_REPORT.md) — **Complete Academic Project Report, Component Breakdown & Faculty Viva Q&A Guide**.
+- 📋 [BRAINSTORMING.md](BRAINSTORMING.md) — Feature ideation, protocol selection & requirement analysis.
+- 🏗️ [DESIGN.md](DESIGN.md) — Detailed class diagrams, state machines, packet schemas & wireframes.
+- 🛠️ [STACK.md](STACK.md) — Technology stack specification, tooling choices & standard library rationale.
+- 🏛️ [ARCHITECTURE.md](ARCHITECTURE.md) — OSI model mapping, sequence diagrams & concurrency thread models.
 
 ---
 
