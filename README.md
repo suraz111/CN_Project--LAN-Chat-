@@ -274,7 +274,7 @@ python -m unittest discover tests/
 
 ---
 
-## 🏛️ Detailed Documentation
+## 🏛️ Detailed Documentations
 
 For comprehensive academic and implementation details, refer to:
 
