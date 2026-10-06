@@ -6,7 +6,7 @@
   <img src="https://img.shields.io/badge/Transport-TCP%20%7C%20UDP-green" alt="TCP / UDP">
   <img src="https://img.shields.io/badge/GUI-Tkinter%20(Catppuccin)-purple" alt="Tkinter GUI">
   <img src="https://img.shields.io/badge/Dependencies-Zero%20External-success" alt="Zero Dependencies">
-  <img src="https://img.shields.io/badge/Tests-37%20Passed-brightgreen" alt="37 Tests Passed">
+  <img src="https://img.shields.io/badge/Tests-48%20Passed-brightgreen" alt="48 Tests Passed">
   <img src="https://img.shields.io/badge/License-MIT-lightgrey" alt="License MIT">
 </p>
 
@@ -62,12 +62,17 @@ You can try the live application right now without installing anything:
 ## 🌟 Features Overview
 
 - 🔍 **Decentralized Auto-Discovery:** Discovers peers dynamically across the local subnet using periodic UDP broadcast heartbeats on port `50000` with zero server configuration.
-- 💬 **Multi-Channel Communication:** Seamlessly switch between global **Group Broadcast Room** and private, isolated **1-on-1 Direct Messaging (DM)** channels with unread notification badges.
+- 💬 **Multi-Channel & Custom Topic Rooms:** Seamlessly switch between global **Group Broadcast Room**, custom topic channels (`#general`, `#project`, `#study`), and private **1-on-1 Direct Messaging (DM)**.
+- 🎙️ **Voice Notes Recording & Playback:** Native in-browser audio recording via Web Audio and MediaRecorder with inline responsive audio player.
+- 👍 **Live Emoji Message Reactions:** Interactive reaction bar (👍, ❤️, 😂, 🔥) with toggleable participant badge pills.
+- 🖼️ **Image Lightbox & Shared Media Gallery:** Clickable image preview thumbnails with full-screen Lightbox zoom and in-app categorized Media Gallery.
+- 📥 **Drag-and-Drop Sharing with Progress Trackers:** Smooth drag-and-drop file upload overlay with animated percentage transfer progress bars.
+- 📌 **Sticky Pinned Messages & Live Search:** Pin critical announcements to the top of any channel and filter conversations with real-time text matching.
+- 🔐 **End-to-End Room Encryption:** Optional symmetric passkey encryption for private rooms with zero external dependencies.
+- 🌐 **Network Adapters & Port Diagnostics:** Enumerates all active local interfaces (Wi-Fi, Ethernet, Hotspot, Loopback) in the Direct P2P Hub.
 - 📱 **Zero-Install Mobile Web Client:** Any smartphone (iOS / Android), tablet, or secondary laptop on the same Wi-Fi can join instantly via browser at `http://<local_ip>:8080`.
 - 📁 **High-Speed Binary File Transfer:** Chunked socket streaming with **SHA-256 checksum integrity verification**, transfer progress bars, and an in-app received files viewer.
 - 🎨 **Modern Catppuccin Themes:** Sleek dark mode (Catppuccin Mocha) and crisp light mode with dynamic theme toggle and glassmorphism accents.
-- ⌨️ **Live Typing Indicators:** Real-time, debounced typing presence across both desktop and mobile clients.
-- ⚡ **Built-In Slash Commands & Quick Emojis:** Client-side commands (`/help`, `/nick`, `/mobile`, `/users`, `/open`, `/clear`, `/shrug`) and one-click emoji selector.
 - 🔒 **Zero External Dependencies:** Built strictly using the Python Standard Library (`socket`, `select`, `threading`, `http.server`, `tkinter`).
 
 ---
@@ -242,7 +247,8 @@ CN_project/
 │   └── utils/                  # Helper utilities
 │       └── net_utils.py        # Local IP resolution & subnet broadcast calculation
 │
-└── tests/                      # Automated test suite (37 tests)
+└── tests/                      # Automated test suite (48 tests)
+    ├── test_new_features.py    # Reactions, pinning, rooms, audio upload, and interfaces
     ├── test_e2e_full.py        # Comprehensive 7-condition End-to-End test suite
     ├── test_tcp.py             # TCP framing, send/receive & port-0 safety tests
     ├── test_web_gateway.py     # HTTP methods, REST routes & port collision tests
@@ -257,7 +263,7 @@ CN_project/
 
 ## 🧪 Automated Testing & Verification
 
-The project includes a comprehensive automated test suite with **37 test conditions** covering unit, integration, and end-to-end scenarios.
+The project includes a comprehensive automated test suite with **48 test conditions** covering unit, integration, and end-to-end scenarios.
 
 Run all tests with a single command:
 ```bash

@@ -20,6 +20,9 @@ class MessageType(str, Enum):
     FILE_CHUNK = "FILE_CHUNK"
     FILE_COMPLETE = "FILE_COMPLETE"
     GOODBYE = "GOODBYE"
+    REACTION = "REACTION"
+    PIN = "PIN"
+    ROOM_MESSAGE = "ROOM_MESSAGE"
 
 
 @dataclass

@@ -96,6 +96,8 @@ class LANChatApp(tk.Tk):
         # channel_id = None for Group Chat; peer_id for direct DMs
         self.chat_histories: Dict[Optional[str], List[dict]] = {None: []}
         self.unread_counts: Dict[Optional[str], int] = {}
+        self.custom_rooms: set = set(["#general", "#project", "#study"])
+        self.pinned_messages: Dict[Optional[str], Optional[dict]] = {}
 
         # Feature flags & state
         self.current_theme = "dark"
@@ -1854,16 +1856,30 @@ class LANChatApp(tk.Tk):
                             continue
                         self.seen_message_ids.add(packet.msg_id)
 
-                    if packet.type == MessageType.GROUP_CHAT:
+                    if packet.type in (MessageType.GROUP_CHAT, MessageType.ROOM_MESSAGE):
                         text = packet.payload.get("text", "")
-                        self._append_message(
-                            None,
-                            f"{packet.sender_name} (Group)",
-                            text,
-                            category="peer",
-                            sender_id=packet.sender_id,
-                            msg_id=packet.msg_id,
-                        )
+                        room = packet.payload.get("room")
+                        if room:
+                            if not hasattr(self, "custom_rooms"):
+                                self.custom_rooms = set(["#general", "#project", "#study"])
+                            self.custom_rooms.add(room)
+                            self._append_message(
+                                room,
+                                f"{packet.sender_name} ({room})",
+                                text,
+                                category="peer",
+                                sender_id=packet.sender_id,
+                                msg_id=packet.msg_id,
+                            )
+                        else:
+                            self._append_message(
+                                None,
+                                f"{packet.sender_name} (Group)",
+                                text,
+                                category="peer",
+                                sender_id=packet.sender_id,
+                                msg_id=packet.msg_id,
+                            )
 
                     elif packet.type == MessageType.CHAT:
                         text = packet.payload.get("text", "")

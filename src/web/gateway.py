@@ -22,7 +22,7 @@ import config
 from src.models.message import MessageType, Packet
 from src.network.file_transfer import FileSender
 from src.network.tcp_client import TCPClient
-from src.utils.net_utils import get_local_ip
+from src.utils.net_utils import get_all_network_interfaces, get_local_ip
 
 
 class WebGatewayHandler(http.server.BaseHTTPRequestHandler):
@@ -79,26 +79,82 @@ class WebGatewayHandler(http.server.BaseHTTPRequestHandler):
             )
 
     def _send_file_content(self, filepath: Path) -> None:
-        """Streams a static asset or download file with appropriate MIME type."""
+        """Streams a static asset or download file with appropriate MIME type and HTTP Range support."""
         if not filepath.exists() or not filepath.is_file():
             self.send_error(404, "File not found")
             return
 
-        mime_type, _ = mimetypes.guess_type(str(filepath))
-        if not mime_type:
-            mime_type = "application/octet-stream"
+        ext = filepath.suffix.lower()
+        AUDIO_VIDEO_MIMES = {
+            ".webm": "audio/webm",
+            ".ogg": "audio/ogg",
+            ".mp3": "audio/mpeg",
+            ".wav": "audio/wav",
+            ".m4a": "audio/mp4",
+            ".mp4": "video/mp4",
+            ".aac": "audio/aac",
+            ".png": "image/png",
+            ".jpg": "image/jpeg",
+            ".jpeg": "image/jpeg",
+            ".gif": "image/gif",
+            ".webp": "image/webp",
+            ".svg": "image/svg+xml",
+        }
+
+        if ext in AUDIO_VIDEO_MIMES:
+            mime_type = AUDIO_VIDEO_MIMES[ext]
+        else:
+            mime_type, _ = mimetypes.guess_type(str(filepath))
+            if not mime_type:
+                mime_type = "application/octet-stream"
 
         try:
             filesize = filepath.stat().st_size
-            self.send_response(200)
-            self.send_header("Content-Type", mime_type)
-            self.send_header("Content-Length", str(filesize))
-            self.send_header("Access-Control-Allow-Origin", "*")
-            self.end_headers()
+            range_header = self.headers.get("Range")
 
-            with open(filepath, "rb") as f:
-                while chunk := f.read(config.MAX_SOCKET_BUFFER):
-                    self.wfile.write(chunk)
+            if range_header and range_header.startswith("bytes="):
+                # HTTP 206 Partial Content for audio / video streaming & seeking
+                range_spec = range_header[len("bytes="):].strip()
+                start_str, _, end_str = range_spec.partition("-")
+                start = int(start_str) if start_str else 0
+                end = int(end_str) if end_str else filesize - 1
+                if end >= filesize:
+                    end = filesize - 1
+                length = end - start + 1
+
+                self.send_response(206)
+                self.send_header("Content-Type", mime_type)
+                self.send_header("Content-Range", f"bytes {start}-{end}/{filesize}")
+                self.send_header("Content-Length", str(length))
+                self.send_header("Accept-Ranges", "bytes")
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.end_headers()
+
+                with open(filepath, "rb") as f:
+                    f.seek(start)
+                    remaining = length
+                    while remaining > 0:
+                        chunk_size = min(config.MAX_SOCKET_BUFFER, remaining)
+                        chunk = f.read(chunk_size)
+                        if not chunk:
+                            break
+                        self.wfile.write(chunk)
+                        remaining -= len(chunk)
+            else:
+                # Full content response
+                self.send_response(200)
+                self.send_header("Content-Type", mime_type)
+                self.send_header("Content-Length", str(filesize))
+                self.send_header("Accept-Ranges", "bytes")
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
+                self.send_header("Pragma", "no-cache")
+                self.send_header("Expires", "0")
+                self.end_headers()
+
+                with open(filepath, "rb") as f:
+                    while chunk := f.read(config.MAX_SOCKET_BUFFER):
+                        self.wfile.write(chunk)
         except Exception:
             pass
 
@@ -145,6 +201,38 @@ class WebGatewayHandler(http.server.BaseHTTPRequestHandler):
                 return
 
             self._send_file_content(target_path)
+            return
+
+        # 2.5 API: Network Interfaces List
+        elif path == "/api/interfaces":
+            self._send_json({"interfaces": get_all_network_interfaces()})
+            return
+
+        # 2.6 API: Media Gallery
+        elif path == "/api/media":
+            media_list = []
+            download_dir = config.DEFAULT_DOWNLOAD_DIR
+            if download_dir.exists():
+                for f in sorted(download_dir.iterdir(), key=lambda p: p.stat().st_mtime if p.is_file() else 0, reverse=True):
+                    if f.is_file():
+                        st = f.stat()
+                        ext = f.suffix.lower()
+                        if ext in ('.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg'):
+                            m_type = 'image'
+                        elif ext in ('.webm', '.ogg', '.mp3', '.wav', '.m4a'):
+                            m_type = 'audio'
+                        elif ext in ('.mp4', '.mov', '.avi', '.mkv'):
+                            m_type = 'video'
+                        else:
+                            m_type = 'document'
+                        media_list.append({
+                            "filename": f.name,
+                            "size": st.st_size,
+                            "mtime": st.st_mtime,
+                            "type": m_type,
+                            "download_url": f"/downloads/{urllib.parse.quote(f.name)}",
+                        })
+            self._send_json({"media": media_list})
             return
 
         # 3. API: Status & Peer Directory
@@ -218,13 +306,20 @@ class WebGatewayHandler(http.server.BaseHTTPRequestHandler):
             notifications = []
             if client_id:
                 read_times = self.server.client_read_times.get(client_id, {})
+                connect_time = self.server.client_connect_times.get(client_id, 0.0)
 
-                # 1. Group Broadcast messages
+                # 1. Group Broadcast messages (exclude system messages)
                 group_last_read = read_times.get(None, 0.0)
                 group_msgs = ctx.chat_histories.get(None, [])
-                new_group = [m for m in group_msgs if m.get("timestamp_epoch", 0) > group_last_read and m.get("sender_id") != client_id]
+                new_group = [
+                    m for m in group_msgs
+                    if m.get("timestamp_epoch", 0) > group_last_read
+                    and m.get("sender_id") != client_id
+                    and m.get("category") != "system"
+                ]
                 unreads["group"] = len(new_group)
-                for m in new_group[-5:]:
+                notify_group = [m for m in new_group if m.get("timestamp_epoch", 0) > connect_time]
+                for m in notify_group[-5:]:
                     notifications.append({
                         "id": m.get("id") or f"{m.get('timestamp_epoch')}_{m.get('sender')}",
                         "channel": None,
@@ -232,15 +327,22 @@ class WebGatewayHandler(http.server.BaseHTTPRequestHandler):
                         "message": m.get("message", ""),
                         "timestamp": m.get("timestamp", ""),
                         "timestamp_epoch": m.get("timestamp_epoch", 0),
+                        "category": m.get("category", "chat"),
                         "is_dm": False,
                     })
 
                 # 2. Private DMs from Desktop Host
                 host_last_read = read_times.get(ctx.peer_id, 0.0)
                 host_msgs = ctx.chat_histories.get(client_id, [])
-                new_host = [m for m in host_msgs if m.get("timestamp_epoch", 0) > host_last_read and m.get("sender_id") != client_id]
+                new_host = [
+                    m for m in host_msgs
+                    if m.get("timestamp_epoch", 0) > host_last_read
+                    and m.get("sender_id") != client_id
+                    and m.get("category") != "system"
+                ]
                 unreads[ctx.peer_id] = len(new_host)
-                for m in new_host[-5:]:
+                notify_host = [m for m in new_host if m.get("timestamp_epoch", 0) > connect_time]
+                for m in notify_host[-5:]:
                     notifications.append({
                         "id": m.get("id") or f"{m.get('timestamp_epoch')}_{m.get('sender')}",
                         "channel": ctx.peer_id,
@@ -248,6 +350,7 @@ class WebGatewayHandler(http.server.BaseHTTPRequestHandler):
                         "message": m.get("message", ""),
                         "timestamp": m.get("timestamp", ""),
                         "timestamp_epoch": m.get("timestamp_epoch", 0),
+                        "category": m.get("category", "chat"),
                         "is_dm": True,
                     })
 
@@ -257,10 +360,16 @@ class WebGatewayHandler(http.server.BaseHTTPRequestHandler):
                         dm_k = f"dm_{min(client_id, cid)}_{max(client_id, cid)}"
                         cid_last_read = read_times.get(cid, 0.0)
                         cid_msgs = ctx.chat_histories.get(dm_k, [])
-                        new_cid = [m for m in cid_msgs if m.get("timestamp_epoch", 0) > cid_last_read and m.get("sender_id") != client_id]
+                        new_cid = [
+                            m for m in cid_msgs
+                            if m.get("timestamp_epoch", 0) > cid_last_read
+                            and m.get("sender_id") != client_id
+                            and m.get("category") != "system"
+                        ]
                         unreads[cid] = len(new_cid)
                         other_name = self.server.web_clients[cid].get("username", "Peer")
-                        for m in new_cid[-5:]:
+                        notify_cid = [m for m in new_cid if m.get("timestamp_epoch", 0) > connect_time]
+                        for m in notify_cid[-5:]:
                             notifications.append({
                                 "id": m.get("id") or f"{m.get('timestamp_epoch')}_{m.get('sender')}",
                                 "channel": cid,
@@ -268,6 +377,7 @@ class WebGatewayHandler(http.server.BaseHTTPRequestHandler):
                                 "message": m.get("message", ""),
                                 "timestamp": m.get("timestamp", ""),
                                 "timestamp_epoch": m.get("timestamp_epoch", 0),
+                                "category": m.get("category", "chat"),
                                 "is_dm": True,
                             })
 
@@ -277,10 +387,16 @@ class WebGatewayHandler(http.server.BaseHTTPRequestHandler):
                         continue
                     p_last_read = read_times.get(pid, 0.0)
                     p_msgs = ctx.chat_histories.get(pid, [])
-                    new_p = [m for m in p_msgs if m.get("timestamp_epoch", 0) > p_last_read and m.get("sender_id") != client_id]
+                    new_p = [
+                        m for m in p_msgs
+                        if m.get("timestamp_epoch", 0) > p_last_read
+                        and m.get("sender_id") != client_id
+                        and m.get("category") != "system"
+                    ]
                     if new_p:
                         unreads[pid] = len(new_p)
-                        for m in new_p[-5:]:
+                        notify_p = [m for m in new_p if m.get("timestamp_epoch", 0) > connect_time]
+                        for m in notify_p[-5:]:
                             notifications.append({
                                 "id": m.get("id") or f"{m.get('timestamp_epoch')}_{m.get('sender')}",
                                 "channel": pid,
@@ -288,8 +404,37 @@ class WebGatewayHandler(http.server.BaseHTTPRequestHandler):
                                 "message": m.get("message", ""),
                                 "timestamp": m.get("timestamp", ""),
                                 "timestamp_epoch": m.get("timestamp_epoch", 0),
+                                "category": m.get("category", "chat"),
                                 "is_dm": True,
                             })
+
+                # 5. Topic Channel Rooms (exclude system messages)
+                for r_name in getattr(ctx, "custom_rooms", ["#general", "#project", "#study"]):
+                    r_last_read = read_times.get(r_name, 0.0)
+                    r_msgs = ctx.chat_histories.get(r_name, [])
+                    new_r = [
+                        m for m in r_msgs
+                        if m.get("timestamp_epoch", 0) > r_last_read
+                        and m.get("sender_id") != client_id
+                        and m.get("category") != "system"
+                    ]
+                    unreads[r_name] = len(new_r)
+                    notify_r = [m for m in new_r if m.get("timestamp_epoch", 0) > connect_time]
+                    for m in notify_r[-5:]:
+                        notifications.append({
+                            "id": m.get("id") or f"{m.get('timestamp_epoch')}_{m.get('sender')}",
+                            "channel": r_name,
+                            "sender": f"{m.get('sender', 'Peer')} in {r_name}",
+                            "message": m.get("message", ""),
+                            "timestamp": m.get("timestamp", ""),
+                            "timestamp_epoch": m.get("timestamp_epoch", 0),
+                            "category": m.get("category", "chat"),
+                            "is_dm": False,
+                        })
+
+            active_ip = get_local_ip()
+            if not active_ip.startswith("127."):
+                ctx.local_ip = active_ip
 
             self._send_json(
                 {
@@ -305,8 +450,12 @@ class WebGatewayHandler(http.server.BaseHTTPRequestHandler):
                     "peer_id": ctx.peer_id,
                     "active_peers": peers_list,
                     "peers": peers_list,
+                    "rooms": sorted(list(getattr(ctx, "custom_rooms", ["#general", "#project", "#study"]))),
                     "unreads": unreads,
                     "notifications": notifications,
+                    "interfaces": get_all_network_interfaces(),
+                    "remembered_username": self.server.ip_saved_names.get(self.client_address[0], ""),
+                    "remembered_client_id": self.server.ip_client_ids.get(self.client_address[0], ""),
                 }
             )
             return
@@ -366,16 +515,21 @@ class WebGatewayHandler(http.server.BaseHTTPRequestHandler):
                 elif msg_sender_id == ctx.peer_id or msg_cat == "self" or "You" in str(m_copy.get("sender", "")):
                     # Message authored by the Desktop Host
                     m_copy["is_self"] = False
-                    m_copy["category"] = "peer" if msg_cat != "file" else "file"
+                    m_copy["category"] = "peer" if msg_cat not in ("file", "audio", "image") else msg_cat
                     m_copy["sender"] = f"{ctx.username} (Host)"
                 else:
                     m_copy["is_self"] = False
+                m_copy.setdefault("reactions", {})
+                m_copy.setdefault("pinned", False)
                 formatted_messages.append(m_copy)
+
+            pinned_msg = getattr(ctx, "pinned_messages", {}).get(channel_id)
 
             self._send_json({
                 "channel": channel_id,
                 "history_key": history_key,
                 "messages": formatted_messages,
+                "pinned_message": pinned_msg,
                 "server_time": time.time(),
             })
             return
@@ -488,7 +642,42 @@ class WebGatewayHandler(http.server.BaseHTTPRequestHandler):
                 # Save into local desktop host history and notify UI with packet's unique msg_id
                 self._safe_append_message(ctx, None, f"{sender_name} 📱 (Group)", text, category="peer", sender_id=client_id, msg_id=packet.msg_id)
 
-            # Case B: Private Direct Message to the Host Desktop User
+            # Case B: Topic Channel Room (e.g. #general, #project, #study, etc.)
+            elif str(channel_id).startswith("#") or channel_id in getattr(ctx, "custom_rooms", set()):
+                if not hasattr(ctx, "custom_rooms"):
+                    ctx.custom_rooms = set(["#general", "#project", "#study"])
+                ctx.custom_rooms.add(str(channel_id))
+
+                packet = Packet(
+                    type=MessageType.ROOM_MESSAGE,
+                    sender_id=client_id,
+                    sender_name=f"{sender_name} 📱",
+                    payload={"text": text, "room": str(channel_id)},
+                )
+                if hasattr(ctx, "seen_message_ids") and isinstance(ctx.seen_message_ids, set):
+                    ctx.seen_message_ids.add(packet.msg_id)
+
+                peers_info = [
+                    (p.ip_address, p.tcp_port)
+                    for p in ctx.peers.values()
+                    if not getattr(p, "is_web", False)
+                    and p.peer_id != ctx.peer_id
+                    and not (
+                        p.ip_address in (ctx.local_ip, "127.0.0.1", "localhost")
+                        and p.tcp_port == getattr(ctx, "actual_tcp_port", config.DEFAULT_TCP_PORT)
+                    )
+                ]
+                if peers_info:
+                    threading.Thread(
+                        target=TCPClient.broadcast_message,
+                        args=(peers_info, packet.to_dict()),
+                        daemon=True,
+                    ).start()
+
+                # Save into local channel history
+                self._safe_append_message(ctx, channel_id, f"{sender_name} 📱 ({channel_id})", text, category="peer", sender_id=client_id, msg_id=packet.msg_id)
+
+            # Case C: Private Direct Message to the Host Desktop User
             elif channel_id == ctx.peer_id or channel_id == "host":
                 # Stored under client_id so Host desktop sees it in conversation with this mobile user
                 ctx._append_message(client_id, f"{sender_name} 📱", text, category="dm", sender_id=client_id)
@@ -635,9 +824,23 @@ class WebGatewayHandler(http.server.BaseHTTPRequestHandler):
                     f.write(file_bytes)
 
                 filesize = save_path.stat().st_size
-                download_url = f"http://{ctx.local_ip}:{self.server.port}/downloads/{urllib.parse.quote(original_filename)}"
+                relative_download_url = f"/downloads/{urllib.parse.quote(original_filename)}"
+                download_url = relative_download_url
 
-                notice_text = f"📎 Shared file: {original_filename} ({filesize} bytes)\nDownload / View: {download_url}"
+                ext = Path(original_filename).suffix.lower()
+                is_voice = ext in (".webm", ".ogg", ".mp3", ".wav", ".m4a") or original_filename.startswith("voice_note_")
+                is_image = ext in (".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg")
+
+                if is_voice:
+                    file_category = "audio"
+                    notice_text = f"🎙️ Voice Note: {original_filename} ({filesize} bytes)\nDownload / View: {download_url}"
+                elif is_image:
+                    file_category = "image"
+                    notice_text = f"🖼️ Photo: {original_filename} ({filesize} bytes)\nDownload / View: {download_url}"
+                else:
+                    file_category = "file"
+                    notice_text = f"📎 Shared file: {original_filename} ({filesize} bytes)\nDownload / View: {download_url}"
+
                 now = time.time()
                 timestamp_str = time.strftime("%H:%M:%S", time.localtime(now))
 
@@ -647,7 +850,7 @@ class WebGatewayHandler(http.server.BaseHTTPRequestHandler):
                         type=MessageType.GROUP_CHAT,
                         sender_id=client_id,
                         sender_name=f"{sender_name} 📱",
-                        payload={"text": notice_text},
+                        payload={"text": notice_text, "file_type": file_category},
                     )
                     if hasattr(ctx, "seen_message_ids") and isinstance(ctx.seen_message_ids, set):
                         ctx.seen_message_ids.add(packet.msg_id)
@@ -668,11 +871,52 @@ class WebGatewayHandler(http.server.BaseHTTPRequestHandler):
                             args=(peers_info, packet.to_dict()),
                             daemon=True,
                         ).start()
-                    self._safe_append_message(ctx, None, f"{sender_name} 📱 (Group)", notice_text, category="file", sender_id=client_id, msg_id=packet.msg_id)
+                    self._safe_append_message(ctx, None, f"{sender_name} 📱 (Group)", notice_text, category=file_category, sender_id=client_id, msg_id=packet.msg_id)
 
-                # Case B: Private file to Host Desktop User
+                # Case B: Topic Channel Room File
+                elif str(channel_id).startswith("#") or channel_id in getattr(ctx, "custom_rooms", set()):
+                    if not hasattr(ctx, "custom_rooms"):
+                        ctx.custom_rooms = set(["#general", "#project", "#study"])
+                    ctx.custom_rooms.add(str(channel_id))
+
+                    packet = Packet(
+                        type=MessageType.ROOM_MESSAGE,
+                        sender_id=client_id,
+                        sender_name=f"{sender_name} 📱",
+                        payload={"text": notice_text, "room": str(channel_id), "file_type": file_category},
+                    )
+                    if hasattr(ctx, "seen_message_ids") and isinstance(ctx.seen_message_ids, set):
+                        ctx.seen_message_ids.add(packet.msg_id)
+
+                    peers_info = [
+                        (p.ip_address, p.tcp_port)
+                        for p in ctx.peers.values()
+                        if not getattr(p, "is_web", False)
+                        and p.peer_id != ctx.peer_id
+                        and not (
+                            p.ip_address in (ctx.local_ip, "127.0.0.1", "localhost")
+                            and p.tcp_port == getattr(ctx, "actual_tcp_port", config.DEFAULT_TCP_PORT)
+                        )
+                    ]
+                    if peers_info:
+                        threading.Thread(
+                            target=TCPClient.broadcast_message,
+                            args=(peers_info, packet.to_dict()),
+                            daemon=True,
+                        ).start()
+                    self._safe_append_message(
+                        ctx,
+                        channel_id,
+                        f"{sender_name} 📱 ({channel_id})",
+                        notice_text,
+                        category=file_category,
+                        sender_id=client_id,
+                        msg_id=packet.msg_id,
+                    )
+
+                # Case C: Private file to Host Desktop User
                 elif channel_id == ctx.peer_id or channel_id == "host":
-                    ctx._append_message(client_id, f"{sender_name} 📱", notice_text, category="file", sender_id=client_id)
+                    ctx._append_message(client_id, f"{sender_name} 📱", notice_text, category=file_category, sender_id=client_id)
 
                 # Case C: Private file to another Mobile / Web User
                 elif channel_id in self.server.web_clients:
@@ -686,7 +930,7 @@ class WebGatewayHandler(http.server.BaseHTTPRequestHandler):
                         "sender": f"{sender_name} 📱",
                         "sender_id": client_id,
                         "message": notice_text,
-                        "category": "file",
+                        "category": file_category,
                         "channel": channel_id,
                     }
                     ctx.chat_histories[dm_key].append(entry)
@@ -698,7 +942,7 @@ class WebGatewayHandler(http.server.BaseHTTPRequestHandler):
                         type=MessageType.CHAT,
                         sender_id=client_id,
                         sender_name=f"{sender_name} 📱",
-                        payload={"text": notice_text},
+                        payload={"text": notice_text, "file_type": file_category},
                     )
                     if peer and not getattr(peer, "is_web", False):
                         threading.Thread(
@@ -706,7 +950,7 @@ class WebGatewayHandler(http.server.BaseHTTPRequestHandler):
                             args=(peer.ip_address, peer.tcp_port, packet.to_dict()),
                             daemon=True,
                         ).start()
-                    ctx._append_message(channel_id, f"{sender_name} 📱", notice_text, category="file")
+                    ctx._append_message(channel_id, f"{sender_name} 📱", notice_text, category=file_category)
 
                 self._send_json(
                     {
@@ -714,6 +958,7 @@ class WebGatewayHandler(http.server.BaseHTTPRequestHandler):
                         "filename": original_filename,
                         "filesize": filesize,
                         "download_url": download_url,
+                        "file_type": file_category,
                         "server_time": now,
                     }
                 )
@@ -732,11 +977,112 @@ class WebGatewayHandler(http.server.BaseHTTPRequestHandler):
                 self._send_json({"success": False, "error": "Target IP:Port is required"}, status=400)
                 return
 
+            if ":" not in target:
+                target = f"{target}:{config.DEFAULT_TCP_PORT}"
+
             if hasattr(ctx, "manual_connect_peer"):
                 success = ctx.manual_connect_peer(target)
                 self._send_json({"success": success, "target": target})
             else:
                 self._send_json({"success": False, "error": "Manual connect not supported"}, status=501)
+            return
+
+        # 5. Emoji Reaction Route: /api/react
+        elif path == "/api/react":
+            body = self.rfile.read(content_length).decode("utf-8")
+            data = json.loads(body)
+            msg_id = data.get("msg_id")
+            emoji = (data.get("emoji") or "").strip()
+            user = (data.get("user") or data.get("sender") or "User").strip()
+
+            if not msg_id or not emoji:
+                self._send_json({"success": False, "error": "msg_id and emoji are required"}, status=400)
+                return
+
+            found_reactions = {}
+            for ch_history in ctx.chat_histories.values():
+                for msg in ch_history:
+                    if msg.get("id") == msg_id or msg.get("msg_id") == msg_id:
+                        reactions = msg.setdefault("reactions", {})
+                        users_for_emoji = reactions.setdefault(emoji, [])
+                        if user in users_for_emoji:
+                            users_for_emoji.remove(user)
+                            if not users_for_emoji:
+                                reactions.pop(emoji, None)
+                        else:
+                            users_for_emoji.append(user)
+                        found_reactions = reactions
+                        break
+
+            self._send_json({"success": True, "msg_id": msg_id, "reactions": found_reactions})
+            return
+
+        # 6. Pin/Unpin Message Route: /api/pin
+        elif path == "/api/pin":
+            body = self.rfile.read(content_length).decode("utf-8")
+            data = json.loads(body)
+            msg_id = data.get("msg_id")
+            raw_channel = data.get("channel")
+            channel_id = None if raw_channel in (None, "", "null", "group") else raw_channel
+            pin_action = data.get("pin", True)
+
+            if not hasattr(ctx, "pinned_messages"):
+                ctx.pinned_messages = {}
+
+            found_msg = None
+            for ch_id, ch_history in ctx.chat_histories.items():
+                for msg in ch_history:
+                    if msg.get("id") == msg_id or msg.get("msg_id") == msg_id:
+                        msg["pinned"] = bool(pin_action)
+                        if pin_action:
+                            found_msg = msg
+                        break
+
+            if pin_action and found_msg:
+                ctx.pinned_messages[channel_id] = found_msg
+            elif not pin_action:
+                ctx.pinned_messages.pop(channel_id, None)
+
+            self._send_json({"success": True, "pinned": pin_action, "channel": channel_id})
+            return
+
+        # 7. Create Custom Room Route: /api/room/create
+        elif path == "/api/room/create":
+            body = self.rfile.read(content_length).decode("utf-8")
+            data = json.loads(body)
+            room_name = (data.get("room") or "").strip()
+            if not room_name:
+                self._send_json({"success": False, "error": "Room name is required"}, status=400)
+                return
+
+            if not room_name.startswith("#"):
+                room_name = "#" + room_name
+
+            if not hasattr(ctx, "custom_rooms"):
+                ctx.custom_rooms = set(["#general", "#project", "#study"])
+            ctx.custom_rooms.add(room_name)
+
+            self._send_json({"success": True, "room": room_name, "rooms": sorted(list(ctx.custom_rooms))})
+            return
+
+        # 8. Delete Custom Room Route: /api/room/delete
+        elif path == "/api/room/delete":
+            body = self.rfile.read(content_length).decode("utf-8")
+            data = json.loads(body)
+            room_name = (data.get("room") or "").strip()
+            if not room_name:
+                self._send_json({"success": False, "error": "Room name is required"}, status=400)
+                return
+
+            if not room_name.startswith("#"):
+                room_name = "#" + room_name
+
+            if not hasattr(ctx, "custom_rooms"):
+                ctx.custom_rooms = set(["#general", "#project", "#study"])
+
+            ctx.custom_rooms.discard(room_name)
+
+            self._send_json({"success": True, "room": room_name, "rooms": sorted(list(ctx.custom_rooms))})
             return
 
         self.send_error(404, "Endpoint not found")
@@ -762,13 +1108,39 @@ class WebGatewayServer(http.server.ThreadingHTTPServer):
         self.web_clients: Dict[str, dict] = {}
         self.clients_lock = threading.Lock()
         self.client_read_times: Dict[str, Dict[Any, float]] = {}
+        self.client_connect_times: Dict[str, float] = {}
+        self.ip_saved_names: Dict[str, str] = {}
+        self.ip_client_ids: Dict[str, str] = {}
 
     def touch_client(self, client_id: str, username: str, ip_address: str) -> None:
-        """Records or updates a web client's presence and notifies app context."""
+        """Records or updates a web client's presence and prevents duplicate entries from the same device IP."""
         now = time.time()
+        replaced_id = None
         with self.clients_lock:
+            # Check if this IP address already has an active client under a different session ID
+            for existing_id, existing_info in list(self.web_clients.items()):
+                if existing_info.get("ip_address") == ip_address and existing_id != client_id:
+                    replaced_id = existing_id
+                    del self.web_clients[existing_id]
+                    if existing_id in self.client_read_times:
+                        del self.client_read_times[existing_id]
+                    if existing_id in self.client_connect_times:
+                        del self.client_connect_times[existing_id]
+                    break
+
+            # If user had a previously set custom name for this device IP, restore it if incoming is default
+            if username in ("Mobile User", "Peer", "", None) and ip_address in self.ip_saved_names:
+                username = self.ip_saved_names[ip_address]
+            elif username and username not in ("Mobile User", "Peer"):
+                self.ip_saved_names[ip_address] = username
+
+            self.ip_client_ids[ip_address] = client_id
+
+            if client_id not in self.client_connect_times:
+                self.client_connect_times[client_id] = now
+
             if client_id not in self.client_read_times:
-                self.client_read_times[client_id] = {None: now}
+                self.client_read_times[client_id] = {}
             self.web_clients[client_id] = {
                 "client_id": client_id,
                 "username": username,
@@ -776,6 +1148,9 @@ class WebGatewayServer(http.server.ThreadingHTTPServer):
                 "ip_address": ip_address,
                 "last_seen": now,
             }
+
+        if replaced_id and hasattr(self.app_context, "remove_web_peer"):
+            self.app_context.remove_web_peer(replaced_id)
 
         if hasattr(self.app_context, "register_web_peer"):
             self.app_context.register_web_peer(client_id, username, ip_address)
