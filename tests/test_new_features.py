@@ -236,7 +236,8 @@ class TestNewFeatures(unittest.TestCase):
             sender_id="other_study_client",
         )
 
-        with urllib.request.urlopen(f"{self.base_url}/api/status?client_id=my_client_xyz") as resp:
+        room_param = urllib.parse.quote("#study")
+        with urllib.request.urlopen(f"{self.base_url}/api/status?client_id=my_client_xyz&rooms={room_param}") as resp:
             self.assertEqual(resp.status, 200)
             data = json.loads(resp.read().decode("utf-8"))
             self.assertIn("unreads", data)

@@ -96,7 +96,7 @@ class LANChatApp(tk.Tk):
         # channel_id = None for Group Chat; peer_id for direct DMs
         self.chat_histories: Dict[Optional[str], List[dict]] = {None: []}
         self.unread_counts: Dict[Optional[str], int] = {}
-        self.custom_rooms: set = set(["#general", "#project", "#study"])
+        self.custom_rooms: set = set()
         self.pinned_messages: Dict[Optional[str], Optional[dict]] = {}
 
         # Feature flags & state
@@ -1861,7 +1861,7 @@ class LANChatApp(tk.Tk):
                         room = packet.payload.get("room")
                         if room:
                             if not hasattr(self, "custom_rooms"):
-                                self.custom_rooms = set(["#general", "#project", "#study"])
+                                self.custom_rooms = set()
                             self.custom_rooms.add(room)
                             self._append_message(
                                 room,

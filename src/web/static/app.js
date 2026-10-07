@@ -301,13 +301,28 @@ function saveUsername(name) {
   setCookie("lanchat_username", name);
 }
 
+function getSavedRooms() {
+  try {
+    const raw = localStorage.getItem("lanchat_my_rooms");
+    return raw ? JSON.parse(raw) : [];
+  } catch (e) {
+    return [];
+  }
+}
+
+function saveMyRooms() {
+  try {
+    localStorage.setItem("lanchat_my_rooms", JSON.stringify(state.customRooms || []));
+  } catch (e) {}
+}
+
 // Application State
 const state = {
   clientId: getOrCreateClientId(),
   username: getSavedUsername(),
-  currentChannel: null, // null = Group Broadcast; "room_name" = Custom Room; or peer_id = Direct DM
+  currentChannel: null, // null = No active room (Welcome hub); "group" = Local Broadcast; "#room" = Custom Room; or peer_id = Direct DM
   peers: [],
-  customRooms: ["#general", "#project", "#study"],
+  customRooms: getSavedRooms(),
   roomSecrets: JSON.parse(localStorage.getItem("lanchat_room_secrets") || "{}"),
   pinnedMessage: null,
   renderedMessageIds: new Set(),
@@ -567,7 +582,6 @@ function initUserSession() {
   dom.userAvatarText.textContent = (state.username || "M").slice(0, 1).toUpperCase();
   dom.loginModal.classList.add("hidden");
   fetchStatus();
-  fetchMessages();
 
   // Auto-join room from URL link if present
   if (state.pendingAutoJoin) {
@@ -582,9 +596,16 @@ function initUserSession() {
     }
 
     if (target === "group") {
-      selectChannel(null);
+      selectChannel("group");
     } else {
       joinRoomByName(target, true);
+    }
+  } else {
+    // If user already has saved rooms, select the first room; otherwise new user starts with no room (Welcome Hub)
+    if (state.customRooms && state.customRooms.length > 0) {
+      selectChannel(state.customRooms[0]);
+    } else {
+      selectChannel(null);
     }
   }
 }
@@ -728,7 +749,8 @@ function setupDragAndDrop() {
 // ========================================================
 async function fetchStatus() {
   try {
-    const url = `/api/status?client_id=${encodeURIComponent(state.clientId)}&username=${encodeURIComponent(state.username || "Mobile User")}`;
+    const joinedRoomsParam = (state.customRooms || []).join(",");
+    const url = `/api/status?client_id=${encodeURIComponent(state.clientId)}&username=${encodeURIComponent(state.username || "Mobile User")}&rooms=${encodeURIComponent(joinedRoomsParam)}`;
     const res = await fetch(url);
     if (!res.ok) return;
     const data = await res.json();
@@ -748,7 +770,10 @@ async function fetchStatus() {
     }
 
     if (Array.isArray(data.rooms)) {
-      state.customRooms = data.rooms;
+      // Merge unique confirmed rooms
+      const merged = Array.from(new Set([...state.customRooms, ...data.rooms]));
+      state.customRooms = merged;
+      saveMyRooms();
       renderCustomRooms();
     }
 
@@ -778,6 +803,17 @@ function renderCustomRooms() {
   if (!dom.customRoomsList) return;
   dom.customRoomsList.innerHTML = "";
 
+  if (state.customRooms.length === 0) {
+    const emptyItem = document.createElement("div");
+    emptyItem.className = "empty-rooms-box";
+    emptyItem.innerHTML = `
+      <span class="empty-rooms-hint">No active rooms</span>
+      <button type="button" class="btn-create-room-chip" onclick="openRoomModal()">➕ Create Room</button>
+    `;
+    dom.customRoomsList.appendChild(emptyItem);
+    return;
+  }
+
   state.customRooms.forEach((roomName) => {
     const item = document.createElement("div");
     const isActive = state.currentChannel === roomName;
@@ -790,10 +826,10 @@ function renderCustomRooms() {
       <div class="peer-avatar room-hash-avatar">#</div>
       <div class="peer-details">
         <span class="peer-name">${escapeHtml(roomName)}</span>
-        <span class="peer-sub">LAN Topic Channel</span>
+        <span class="peer-sub">Private Topic Room</span>
       </div>
       <div class="room-actions-inline">
-        <button type="button" class="btn-room-del" title="Delete ${escapeHtml(roomName)}" onclick="event.stopPropagation(); handleDeleteRoomClick(this, '${escapeHtml(roomName)}')">🗑️</button>
+        <button type="button" class="btn-room-del" title="Leave ${escapeHtml(roomName)}" onclick="event.stopPropagation(); handleDeleteRoomClick(this, '${escapeHtml(roomName)}')">🗑️</button>
       </div>
       <span class="unread-pill ${unread > 0 ? "" : "hidden"}">${unread}</span>
     `;
@@ -849,8 +885,44 @@ function renderPeersList(peers) {
 // ========================================================
 // Message Fetching & Rendering
 // ========================================================
+function renderWelcomeHub() {
+  if (!dom.chatMessages) return;
+  dom.chatMessages.innerHTML = `
+    <div class="network-welcome-hub">
+      <div class="welcome-hub-card glass-card">
+        <div class="welcome-hub-badge">
+          <span>🔒 PRIVATE LOCAL NETWORK</span>
+        </div>
+        <div class="welcome-hub-icon">📡</div>
+        <h3 class="welcome-hub-title">Start Your Network</h3>
+        <p class="welcome-hub-sub">
+          You are currently not in any rooms. Conversations on this platform are strictly private to people who join your room or connect on the same local Wi-Fi.
+        </p>
+        <div class="welcome-hub-actions">
+          <button type="button" class="btn-hub-primary" onclick="openRoomModal()">
+            ➕ Create Private Room
+          </button>
+          <button type="button" class="btn-hub-secondary" onclick="openJoinRoomModal()">
+            🔑 Join with Code
+          </button>
+          <button type="button" class="btn-hub-ghost" onclick="selectChannel('group')">
+            🌐 Local LAN Broadcast
+          </button>
+        </div>
+        <div class="welcome-hub-tips">
+          <span>💡 <strong>Tip:</strong> Create a room like <code>#mygroup</code>, then click <strong>🔗 Invite</strong> to share a live QR code or 1-click link!</span>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
 async function fetchMessages() {
-  const channelParam = state.currentChannel === null ? "group" : state.currentChannel;
+  if (state.currentChannel === null) {
+    renderWelcomeHub();
+    return;
+  }
+  const channelParam = state.currentChannel;
   try {
     const isInitialLoad = state.lastPollTime === 0;
     const url = `/api/messages?channel=${encodeURIComponent(channelParam)}&client_id=${encodeURIComponent(state.clientId)}&username=${encodeURIComponent(state.username || "Mobile User")}&since=${state.lastPollTime}`;
@@ -909,30 +981,41 @@ function selectChannel(channelId) {
   state.currentChannel = channelId;
 
   // Close mobile drawer on item select
-  dom.sidebarDrawer.classList.remove("open");
-  dom.drawerBackdrop.classList.remove("active");
+  if (dom.sidebarDrawer) dom.sidebarDrawer.classList.remove("open");
+  if (dom.drawerBackdrop) dom.drawerBackdrop.classList.remove("active");
 
   // Highlight active channel in sidebar
-  document.getElementById("channel-group").classList.toggle("active", channelId === null);
+  const groupElem = document.getElementById("channel-group");
+  if (groupElem) {
+    groupElem.classList.toggle("active", channelId === "group");
+  }
   document.querySelectorAll(".peer-item").forEach((el) => {
-    el.classList.remove("active");
+    if (el !== groupElem) el.classList.remove("active");
   });
   renderCustomRooms();
 
   // Clear unread badge
-  state.unreadCounts[channelId] = 0;
-  if (channelId === null) {
+  if (channelId !== null) {
+    state.unreadCounts[channelId] = 0;
+  }
+  if (channelId === "group" && dom.badgeGroup) {
     dom.badgeGroup.classList.add("hidden");
   }
 
   // Update Chat Header
   if (channelId === null) {
-    dom.activeChannelTitle.textContent = "💬 Group Broadcast";
-    dom.activeChannelSub.textContent = "Broadcast to all network peers";
+    dom.activeChannelTitle.textContent = "📡 Private Network Hub";
+    dom.activeChannelSub.textContent = "Create or join a private room to start chatting";
+    dom.btnHeaderInfo.title = "View LAN Network Details";
+    renderWelcomeHub();
+    return;
+  } else if (channelId === "group") {
+    dom.activeChannelTitle.textContent = "🌐 Local LAN Broadcast";
+    dom.activeChannelSub.textContent = "All devices on local Wi-Fi / Hotspot";
     dom.btnHeaderInfo.title = "View LAN Network Details";
   } else if (String(channelId).startsWith("#")) {
     dom.activeChannelTitle.textContent = `🏷️ ${channelId}`;
-    dom.activeChannelSub.textContent = "Topic Room • Shared across local network";
+    dom.activeChannelSub.textContent = "Private Topic Room • End-to-End Local Network";
     dom.btnHeaderInfo.title = `View Channel Info for ${channelId}`;
   } else {
     const peer = state.peers.find((p) => p.peer_id === channelId);
@@ -1497,22 +1580,28 @@ async function handleCreateRoomSubmit() {
   if (!roomName) return;
 
   const formattedName = roomName.startsWith("#") ? roomName : `#${roomName}`;
+  if (!state.customRooms.includes(formattedName)) {
+    state.customRooms.push(formattedName);
+    saveMyRooms();
+  }
   try {
     const res = await fetch("/api/room/create", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ room: formattedName }),
+      body: JSON.stringify({ room: formattedName, client_id: state.clientId }),
     });
     if (res.ok) {
       const data = await res.json();
-      state.customRooms = data.rooms;
-      renderCustomRooms();
-      closeRoomModal();
-      selectChannel(formattedName);
+      if (Array.isArray(data.rooms)) {
+        state.customRooms = Array.from(new Set([...state.customRooms, ...data.rooms]));
+        saveMyRooms();
+      }
     }
-  } catch (e) {
-    alert("Failed to create room: " + e.message);
-  }
+  } catch (e) {}
+
+  closeRoomModal();
+  renderCustomRooms();
+  selectChannel(formattedName);
 }
 
 function handleDeleteRoomClick(btn, roomName) {
@@ -1522,7 +1611,7 @@ function handleDeleteRoomClick(btn, roomName) {
     deleteRoom(roomName);
   } else {
     btn.dataset.confirming = "true";
-    btn.textContent = "Delete?";
+    btn.textContent = "Leave?";
     btn.classList.add("confirming");
     setTimeout(() => {
       if (btn && btn.dataset.confirming === "true") {
@@ -1535,29 +1624,32 @@ function handleDeleteRoomClick(btn, roomName) {
 }
 
 async function deleteRoom(roomName) {
+  state.customRooms = state.customRooms.filter((r) => r !== roomName);
+  saveMyRooms();
+  renderCustomRooms();
+
   try {
-    const res = await fetch("/api/room/delete", {
+    await fetch("/api/room/delete", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ room: roomName }),
+      body: JSON.stringify({ room: roomName, client_id: state.clientId }),
     });
-    if (res.ok) {
-      const data = await res.json();
-      state.customRooms = data.rooms || state.customRooms.filter((r) => r !== roomName);
-      if (state.currentChannel === roomName) {
-        selectChannel(null); // Return to Group Broadcast
-      }
-      renderCustomRooms();
-      showToastNotification({
-        id: "del_" + Date.now(),
-        sender: "🗑️ Room Deleted",
-        message: `Deleted room ${roomName}`,
-        channel: "group",
-      });
+  } catch (err) {}
+
+  if (state.currentChannel === roomName) {
+    if (state.customRooms.length > 0) {
+      selectChannel(state.customRooms[0]);
+    } else {
+      selectChannel(null); // Return to Welcome Hub
     }
-  } catch (err) {
-    console.error("Failed to delete room:", err);
   }
+
+  showToastNotification({
+    id: "del_" + Date.now(),
+    sender: "🗑️ Room Left",
+    message: `Left room ${roomName}`,
+    channel: null,
+  });
 }
 
 // ========================================================
@@ -1585,15 +1677,15 @@ async function handleJoinRoomSubmit() {
 
 async function joinRoomByName(roomName, isFromUrl = false) {
   if (!roomName) return;
-  if (roomName.toLowerCase() === "group" || roomName === "Group Broadcast") {
-    selectChannel(null);
+  if (roomName.toLowerCase() === "group" || roomName === "Group Broadcast" || roomName === "Local LAN Broadcast") {
+    selectChannel("group");
     const groupNotifKey = "joined_group";
     if (isFromUrl && !state.notifiedMessageIds.has(groupNotifKey)) {
       state.notifiedMessageIds.add(groupNotifKey);
       showToastNotification({
         id: groupNotifKey,
         sender: "🎉 Joined Chat",
-        message: "You connected to Group Broadcast via invitation link!",
+        message: "You connected to Local LAN Broadcast via invitation link!",
         channel: "group",
       });
     }
@@ -1602,29 +1694,28 @@ async function joinRoomByName(roomName, isFromUrl = false) {
   const formatted = roomName.startsWith("#") ? roomName : `#${roomName}`;
 
   if (!state.customRooms.includes(formatted)) {
-    try {
-      const res = await fetch("/api/room/create", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ room: formatted }),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        if (Array.isArray(data.rooms)) {
-          state.customRooms = data.rooms;
-        } else {
-          state.customRooms.push(formatted);
-        }
-      }
-    } catch (e) {
-      if (!state.customRooms.includes(formatted)) {
-        state.customRooms.push(formatted);
+    state.customRooms.push(formatted);
+    saveMyRooms();
+  }
+
+  try {
+    const res = await fetch("/api/room/create", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ room: formatted, client_id: state.clientId }),
+    });
+    if (res.ok) {
+      const data = await res.json();
+      if (Array.isArray(data.rooms)) {
+        state.customRooms = Array.from(new Set([...state.customRooms, ...data.rooms]));
+        saveMyRooms();
       }
     }
-  }
+  } catch (e) {}
 
   renderCustomRooms();
   selectChannel(formatted);
+
 
   const joinNotifKey = `joined_${formatted}`;
   if (!state.notifiedMessageIds.has(joinNotifKey)) {
@@ -1898,7 +1989,7 @@ function startPrivateNetworkFlow() {
       channel: null,
     });
   } else {
-    openInviteModal();
+    openRoomModal();
   }
 }
 
@@ -1996,6 +2087,17 @@ function decryptMessagePayload(text, secret) {
 async function sendMessage() {
   const rawText = dom.messageInput.value.trim();
   if (!rawText) return;
+
+  if (state.currentChannel === null) {
+    showToastNotification({
+      id: "toast_room_req_" + Date.now(),
+      sender: "🔒 Private Network",
+      message: "Please create or join a private room to start chatting.",
+      channel: null,
+    });
+    openRoomModal();
+    return;
+  }
 
   dom.messageInput.value = "";
   dom.messageInput.focus();

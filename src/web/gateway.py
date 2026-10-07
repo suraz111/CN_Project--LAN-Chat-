@@ -419,8 +419,19 @@ class WebGatewayHandler(http.server.BaseHTTPRequestHandler):
                                 "is_dm": True,
                             })
 
-                # 5. Topic Channel Rooms (exclude system messages)
-                for r_name in getattr(ctx, "custom_rooms", ["#general", "#project", "#study"]):
+                # 5. Topic Channel Rooms: Only notify and count unreads for rooms THIS client has joined!
+                client_joined_rooms = set(self.server.client_rooms.get(client_id, set())) if client_id else set()
+                sync_rooms_param = query.get("rooms", [None])[0]
+                if sync_rooms_param and client_id:
+                    for rm in sync_rooms_param.split(","):
+                        rm = rm.strip()
+                        if rm:
+                            if not rm.startswith("#"):
+                                rm = "#" + rm
+                            client_joined_rooms.add(rm)
+                    self.server.client_rooms[client_id] = client_joined_rooms
+
+                for r_name in client_joined_rooms:
                     r_last_read = read_times.get(r_name, 0.0)
                     r_msgs = ctx.chat_histories.get(r_name, [])
                     new_r = [
@@ -452,6 +463,9 @@ class WebGatewayHandler(http.server.BaseHTTPRequestHandler):
             if not active_ip.startswith("127."):
                 ctx.local_ip = active_ip
 
+            # Client only receives the rooms they have joined or created (empty for new users)
+            out_rooms = sorted(list(client_joined_rooms)) if client_id else sorted(list(getattr(ctx, "custom_rooms", set())))
+
             self._send_json(
                 {
                     "online": True,
@@ -466,7 +480,7 @@ class WebGatewayHandler(http.server.BaseHTTPRequestHandler):
                     "peer_id": ctx.peer_id,
                     "active_peers": peers_list,
                     "peers": peers_list,
-                    "rooms": sorted(list(getattr(ctx, "custom_rooms", ["#general", "#project", "#study"]))),
+                    "rooms": out_rooms,
                     "unreads": unreads,
                     "notifications": notifications,
                     "interfaces": get_all_network_interfaces(),
@@ -661,7 +675,7 @@ class WebGatewayHandler(http.server.BaseHTTPRequestHandler):
             # Case B: Topic Channel Room (e.g. #general, #project, #study, etc.)
             elif str(channel_id).startswith("#") or channel_id in getattr(ctx, "custom_rooms", set()):
                 if not hasattr(ctx, "custom_rooms"):
-                    ctx.custom_rooms = set(["#general", "#project", "#study"])
+                    ctx.custom_rooms = set()
                 ctx.custom_rooms.add(str(channel_id))
 
                 packet = Packet(
@@ -892,7 +906,7 @@ class WebGatewayHandler(http.server.BaseHTTPRequestHandler):
                 # Case B: Topic Channel Room File
                 elif str(channel_id).startswith("#") or channel_id in getattr(ctx, "custom_rooms", set()):
                     if not hasattr(ctx, "custom_rooms"):
-                        ctx.custom_rooms = set(["#general", "#project", "#study"])
+                        ctx.custom_rooms = set()
                     ctx.custom_rooms.add(str(channel_id))
 
                     packet = Packet(
@@ -1062,11 +1076,12 @@ class WebGatewayHandler(http.server.BaseHTTPRequestHandler):
             self._send_json({"success": True, "pinned": pin_action, "channel": channel_id})
             return
 
-        # 7. Create Custom Room Route: /api/room/create
-        elif path == "/api/room/create":
+        # 7. Create/Join Custom Room Route: /api/room/create, /api/room/join
+        elif path in ("/api/room/create", "/api/room/join"):
             body = self.rfile.read(content_length).decode("utf-8")
             data = json.loads(body)
             room_name = (data.get("room") or "").strip()
+            client_id = data.get("client_id")
             if not room_name:
                 self._send_json({"success": False, "error": "Room name is required"}, status=400)
                 return
@@ -1075,17 +1090,24 @@ class WebGatewayHandler(http.server.BaseHTTPRequestHandler):
                 room_name = "#" + room_name
 
             if not hasattr(ctx, "custom_rooms"):
-                ctx.custom_rooms = set(["#general", "#project", "#study"])
+                ctx.custom_rooms = set()
             ctx.custom_rooms.add(room_name)
 
-            self._send_json({"success": True, "room": room_name, "rooms": sorted(list(ctx.custom_rooms))})
+            if client_id:
+                self.server.client_rooms.setdefault(client_id, set()).add(room_name)
+                c_rooms = sorted(list(self.server.client_rooms[client_id]))
+            else:
+                c_rooms = sorted(list(ctx.custom_rooms))
+
+            self._send_json({"success": True, "room": room_name, "rooms": c_rooms})
             return
 
-        # 8. Delete Custom Room Route: /api/room/delete
+        # 8. Delete/Leave Custom Room Route: /api/room/delete
         elif path == "/api/room/delete":
             body = self.rfile.read(content_length).decode("utf-8")
             data = json.loads(body)
             room_name = (data.get("room") or "").strip()
+            client_id = data.get("client_id")
             if not room_name:
                 self._send_json({"success": False, "error": "Room name is required"}, status=400)
                 return
@@ -1094,11 +1116,17 @@ class WebGatewayHandler(http.server.BaseHTTPRequestHandler):
                 room_name = "#" + room_name
 
             if not hasattr(ctx, "custom_rooms"):
-                ctx.custom_rooms = set(["#general", "#project", "#study"])
+                ctx.custom_rooms = set()
 
             ctx.custom_rooms.discard(room_name)
 
-            self._send_json({"success": True, "room": room_name, "rooms": sorted(list(ctx.custom_rooms))})
+            if client_id and client_id in self.server.client_rooms:
+                self.server.client_rooms[client_id].discard(room_name)
+                c_rooms = sorted(list(self.server.client_rooms[client_id]))
+            else:
+                c_rooms = sorted(list(ctx.custom_rooms))
+
+            self._send_json({"success": True, "room": room_name, "rooms": c_rooms})
             return
 
         self.send_error(404, "Endpoint not found")
@@ -1129,6 +1157,7 @@ class WebGatewayServer(http.server.ThreadingHTTPServer):
         self.client_saved_names: Dict[str, str] = {}
         self.ip_saved_names: Dict[str, str] = {}
         self.ip_client_ids: Dict[str, str] = {}
+        self.client_rooms: Dict[str, Set[str]] = {}
 
     def touch_client(self, client_id: str, username: str, ip_address: str) -> None:
         """Records or updates a web client's presence by unique client_id without evicting peers sharing an IP/proxy."""
@@ -1148,6 +1177,9 @@ class WebGatewayServer(http.server.ThreadingHTTPServer):
 
             if client_id not in self.client_read_times:
                 self.client_read_times[client_id] = {}
+
+            if client_id not in self.client_rooms:
+                self.client_rooms[client_id] = set()
 
             self.web_clients[client_id] = {
                 "client_id": client_id,

@@ -44,7 +44,7 @@ class HeadlessAppContext:
         self.chat_histories: Dict[Optional[str], List[dict]] = {None: []}
         self.unread_counts: Dict[Optional[str], int] = {}
         self.seen_message_ids: set = set()
-        self.custom_rooms: set = set(["#general", "#project", "#study"])
+        self.custom_rooms: set = set()
         self.pinned_messages: Dict[Optional[str], Optional[dict]] = {}
 
         # Network engines
@@ -227,7 +227,7 @@ class HeadlessAppContext:
                 room = packet.payload.get("room")
                 if room:
                     if not hasattr(self, "custom_rooms"):
-                        self.custom_rooms = set(["#general", "#project", "#study"])
+                        self.custom_rooms = set()
                     self.custom_rooms.add(room)
                     self._append_message(room, f"{packet.sender_name} ({room})", text, category="peer", sender_id=packet.sender_id, msg_id=packet.msg_id)
                 else:
