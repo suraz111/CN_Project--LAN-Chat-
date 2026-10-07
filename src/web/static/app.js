@@ -418,7 +418,13 @@ const dom = {
   inputRoomName: document.getElementById("input-room-name"),
   encryptionModal: document.getElementById("encryption-modal"),
   inputRoomSecret: document.getElementById("input-room-secret"),
+  inputRoomPasskey: document.getElementById("input-room-passkey"),
   encryptIcon: document.getElementById("encrypt-icon"),
+  encryptLabel: document.getElementById("encrypt-label"),
+  encryptionModalTitle: document.getElementById("encryption-modal-title"),
+  encryptionModalTarget: document.getElementById("encryption-modal-target"),
+  encryptionStatusText: document.getElementById("encryption-status-text"),
+  encryptionStatusBanner: document.getElementById("encryption-status-banner"),
   toastContainer: document.getElementById("toast-container"),
   
   // New Clean Navbar, Join Room, Invite & Share, and Control Center
@@ -443,6 +449,7 @@ const dom = {
   ctrlThemeIcon: document.getElementById("ctrl-theme-icon"),
   ctrlSoundIcon: document.getElementById("ctrl-sound-icon"),
   btnHeaderInvite: document.getElementById("btn-header-invite"),
+  btnHeaderEncrypt: document.getElementById("btn-header-encrypt"),
   btnGuideToggle: document.getElementById("btn-guide-toggle"),
   landingModal: document.getElementById("landing-modal"),
   chkSkipLanding: document.getElementById("chk-skip-landing"),
@@ -837,16 +844,17 @@ function renderCustomRooms() {
   state.customRooms.forEach((roomName) => {
     const item = document.createElement("div");
     const isActive = state.currentChannel === roomName;
-    item.className = `peer-item ${isActive ? "active" : ""}`;
+    const isLocked = Boolean(state.roomSecrets[roomName]);
+    item.className = `peer-item ${isActive ? "active" : ""} ${isLocked ? "has-lock" : ""}`;
     item.onclick = () => selectChannel(roomName);
 
     const unread = state.unreadCounts[roomName] || 0;
 
     item.innerHTML = `
-      <div class="peer-avatar room-hash-avatar">#</div>
+      <div class="peer-avatar room-hash-avatar">${isLocked ? "🔒" : "#"}</div>
       <div class="peer-details">
-        <span class="peer-name">${escapeHtml(roomName)}</span>
-        <span class="peer-sub">Private Topic Room</span>
+        <span class="peer-name">${escapeHtml(roomName)} ${isLocked ? '<span class="room-lock-tag" title="Secured with passphrase">🔒</span>' : ''}</span>
+        <span class="peer-sub">${isLocked ? "Encrypted Topic Room" : "Topic Room"}</span>
       </div>
       <div class="room-actions-inline">
         <button type="button" class="btn-room-del" title="Leave ${escapeHtml(roomName)}" onclick="event.stopPropagation(); handleDeleteRoomClick(this, '${escapeHtml(roomName)}')">🗑️</button>
@@ -1078,11 +1086,22 @@ function appendMessageRow(msg) {
   // Check for End-to-End Encryption
   const rawText = msg.message || "";
   const secretKey = state.roomSecrets[state.currentChannel] || "";
-  const { text: displayText, isEncrypted } = decryptMessagePayload(rawText, secretKey);
+  const { text: displayText, isEncrypted, needsKey, wrongKey } = decryptMessagePayload(rawText, secretKey);
 
   // Parse media, audio and download links (both absolute URLs and relative /downloads/ paths)
   let mediaHtml = "";
-  let messageContent = escapeHtml(displayText);
+  let messageContent = "";
+
+  if (needsKey || wrongKey) {
+    messageContent = `
+      <div class="encrypted-locked-bubble">
+        <span class="lock-bubble-text">${escapeHtml(displayText)}</span>
+        <button type="button" class="btn-bubble-unlock" onclick="openEncryptionModal()">Enter Passphrase 🔑</button>
+      </div>
+    `;
+  } else {
+    messageContent = escapeHtml(displayText);
+  }
 
   const urlRegex = /(?:https?:\/\/[^\s<>"']+|\/downloads\/[^\s<>"']+)/g;
   const urlMatches = rawText.match(urlRegex) || [];
@@ -1601,11 +1620,19 @@ async function handleCreateRoomSubmit() {
   const roomName = (dom.inputRoomName.value || "").trim();
   if (!roomName) return;
 
+  const passkey = dom.inputRoomPasskey ? dom.inputRoomPasskey.value.trim() : "";
   const formattedName = roomName.startsWith("#") ? roomName : `#${roomName}`;
   if (!state.customRooms.includes(formattedName)) {
     state.customRooms.push(formattedName);
     saveMyRooms();
   }
+
+  // If a password was specified during creation, save it to roomSecrets immediately
+  if (passkey) {
+    state.roomSecrets[formattedName] = passkey;
+    localStorage.setItem("lanchat_room_secrets", JSON.stringify(state.roomSecrets));
+  }
+
   try {
     const res = await fetch("/api/room/create", {
       method: "POST",
@@ -1621,9 +1648,19 @@ async function handleCreateRoomSubmit() {
     }
   } catch (e) {}
 
+  if (dom.inputRoomPasskey) dom.inputRoomPasskey.value = "";
   closeRoomModal();
   renderCustomRooms();
   selectChannel(formattedName);
+
+  if (passkey) {
+    showToastNotification({
+      id: "toast_lock_" + Date.now(),
+      sender: "🔒 Room Secured",
+      message: `${formattedName} is now locked with your passphrase.`,
+      channel: formattedName,
+    });
+  }
 }
 
 function handleDeleteRoomClick(btn, roomName) {
@@ -2051,16 +2088,48 @@ window.closeLandingModal = closeLandingModal;
 window.launchChatFromLanding = launchChatFromLanding;
 window.startPrivateNetworkFlow = startPrivateNetworkFlow;
 window.scrollToOfflineGuide = scrollToOfflineGuide;
+window.openEncryptionModal = openEncryptionModal;
+window.closeEncryptionModal = closeEncryptionModal;
+window.saveRoomEncryption = saveRoomEncryption;
+window.disableRoomEncryption = disableRoomEncryption;
 
 // ========================================================
 // Room End-to-End Encryption
 // ========================================================
-function openEncryptionModal() {
+function openEncryptionModal(targetChannel = null) {
+  const channel = targetChannel || state.currentChannel;
+  if (!channel) {
+    showToastNotification({
+      id: "toast_lock_warn_" + Date.now(),
+      sender: "🔒 Room Lock",
+      message: "Please select or create a room first to configure its lock.",
+      channel: null,
+    });
+    openRoomModal();
+    return;
+  }
+
   if (!dom.encryptionModal) return;
   dom.encryptionModal.classList.remove("hidden");
+
+  const channelLabel = channel === "group" ? "Local LAN Broadcast" : channel;
+  if (dom.encryptionModalTarget) {
+    dom.encryptionModalTarget.textContent = `Securing channel: ${channelLabel}`;
+  }
+
+  const currentSecret = state.roomSecrets[channel] || "";
   if (dom.inputRoomSecret) {
-    dom.inputRoomSecret.value = state.roomSecrets[state.currentChannel] || "";
+    dom.inputRoomSecret.value = currentSecret;
     dom.inputRoomSecret.focus();
+  }
+
+  if (dom.encryptionStatusText) {
+    dom.encryptionStatusText.textContent = currentSecret
+      ? "🔒 Lock is currently ACTIVE with a secret key"
+      : "🔓 Room is currently UNENCRYPTED";
+  }
+  if (dom.encryptionStatusBanner) {
+    dom.encryptionStatusBanner.className = `encryption-status-banner ${currentSecret ? "active" : "inactive"}`;
   }
 }
 
@@ -2069,60 +2138,147 @@ function closeEncryptionModal() {
 }
 
 function saveRoomEncryption() {
-  const secret = (dom.inputRoomSecret.value || "").trim();
+  const channel = state.currentChannel;
+  if (!channel) {
+    closeEncryptionModal();
+    return;
+  }
+  const secret = (dom.inputRoomSecret ? dom.inputRoomSecret.value : "").trim();
   if (secret) {
-    state.roomSecrets[state.currentChannel] = secret;
+    state.roomSecrets[channel] = secret;
+    showToastNotification({
+      id: "toast_lock_set_" + Date.now(),
+      sender: "🔒 Passphrase Applied",
+      message: `Lock enabled for ${channel}. Messages are now end-to-end encrypted.`,
+      channel: channel,
+    });
   } else {
-    delete state.roomSecrets[state.currentChannel];
+    delete state.roomSecrets[channel];
   }
   localStorage.setItem("lanchat_room_secrets", JSON.stringify(state.roomSecrets));
   updateEncryptionIcon();
+  renderCustomRooms();
   closeEncryptionModal();
+
+  // Re-render active messages with updated key
+  state.lastPollTime = 0;
+  state.renderedMessageIds.clear();
+  dom.chatMessages.innerHTML = "";
   fetchMessages();
 }
 
 function disableRoomEncryption() {
-  delete state.roomSecrets[state.currentChannel];
-  localStorage.setItem("lanchat_room_secrets", JSON.stringify(state.roomSecrets));
+  const channel = state.currentChannel;
+  if (channel) {
+    delete state.roomSecrets[channel];
+    localStorage.setItem("lanchat_room_secrets", JSON.stringify(state.roomSecrets));
+    showToastNotification({
+      id: "toast_lock_off_" + Date.now(),
+      sender: "🔓 Lock Removed",
+      message: `Encryption disabled for ${channel}.`,
+      channel: channel,
+    });
+  }
   updateEncryptionIcon();
+  renderCustomRooms();
   closeEncryptionModal();
+
+  // Re-render active messages without key
+  state.lastPollTime = 0;
+  state.renderedMessageIds.clear();
+  dom.chatMessages.innerHTML = "";
   fetchMessages();
 }
 
 function updateEncryptionIcon() {
-  const isEncrypted = Boolean(state.roomSecrets[state.currentChannel]);
+  const isEncrypted = Boolean(state.currentChannel && state.roomSecrets[state.currentChannel]);
+  if (dom.btnHeaderEncrypt) {
+    dom.btnHeaderEncrypt.classList.toggle("lock-active", isEncrypted);
+    dom.btnHeaderEncrypt.title = isEncrypted
+      ? `🔒 Room Encrypted (${state.currentChannel}) - Click to manage lock`
+      : "🔓 Room Unencrypted - Click to lock with a passphrase";
+  }
   if (dom.encryptIcon) {
     dom.encryptIcon.textContent = isEncrypted ? "🔒" : "🔓";
-    dom.encryptIcon.title = isEncrypted ? "Room Encryption Active" : "Room Open / Unencrypted";
+  }
+  if (dom.encryptLabel) {
+    dom.encryptLabel.textContent = isEncrypted ? "Secured" : "Lock";
   }
 }
 
-// Lightweight zero-dependency symmetric cipher
+// Lightweight zero-dependency authenticated symmetric cipher
+function djb2Hash(str) {
+  let hash = 5381;
+  for (let i = 0; i < str.length; i++) hash = ((hash << 5) + hash) + str.charCodeAt(i);
+  return (hash >>> 0).toString(16).padStart(8, "0");
+}
+
+function u8ToBase64(u8) {
+  let binary = "";
+  for (let i = 0; i < u8.length; i++) binary += String.fromCharCode(u8[i]);
+  return btoa(binary);
+}
+
+function base64ToU8(b64) {
+  const binary = atob(b64);
+  const u8 = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) u8[i] = binary.charCodeAt(i);
+  return u8;
+}
+
 function encryptMessagePayload(text, secret) {
   if (!secret) return text;
-  let cipher = "";
-  for (let i = 0; i < text.length; i++) {
-    cipher += String.fromCharCode(text.charCodeAt(i) ^ secret.charCodeAt(i % secret.length));
+  const tag = djb2Hash(secret).slice(0, 6);
+  const textBytes = new TextEncoder().encode(text);
+  const secBytes = new TextEncoder().encode(secret);
+  const cipher = new Uint8Array(textBytes.length);
+  for (let i = 0; i < textBytes.length; i++) {
+    cipher[i] = textBytes[i] ^ secBytes[i % secBytes.length];
   }
-  return "[ENC]" + btoa(encodeURIComponent(cipher));
+  return `[ENC:v1:${tag}:${u8ToBase64(cipher)}]`;
 }
 
 function decryptMessagePayload(text, secret) {
-  if (!text || !text.startsWith("[ENC]")) {
-    return { text: text, isEncrypted: false };
-  }
-  if (!secret) {
-    return { text: "🔒 [Encrypted Message — Secret Key Required]", isEncrypted: true };
-  }
-  try {
-    const raw = decodeURIComponent(atob(text.slice(5)));
-    let plain = "";
-    for (let i = 0; i < raw.length; i++) {
-      plain += String.fromCharCode(raw.charCodeAt(i) ^ secret.charCodeAt(i % secret.length));
+  if (!text || !text.startsWith("[ENC:v1:")) {
+    // Support legacy [ENC] format fallback
+    if (text && text.startsWith("[ENC]")) {
+      if (!secret) return { text: "🔒 Encrypted Message — Passphrase Required", isEncrypted: true, needsKey: true };
+      try {
+        const raw = decodeURIComponent(atob(text.slice(5)));
+        let plain = "";
+        for (let i = 0; i < raw.length; i++) plain += String.fromCharCode(raw.charCodeAt(i) ^ secret.charCodeAt(i % secret.length));
+        return { text: plain, isEncrypted: true, wrongKey: false };
+      } catch (e) {
+        return { text: "🔒 Encrypted Message (Incorrect Passphrase)", isEncrypted: true, wrongKey: true };
+      }
     }
-    return { text: plain, isEncrypted: true };
+    return { text: text, isEncrypted: false, needsKey: false, wrongKey: false };
+  }
+
+  const parts = text.split(":");
+  if (parts.length < 4) return { text: "[Corrupted Encrypted Payload]", isEncrypted: true, wrongKey: true };
+  const msgTag = parts[2];
+  const b64 = parts[3].slice(0, -1);
+
+  if (!secret) {
+    return { text: "🔒 Encrypted Message — Passphrase Required", isEncrypted: true, needsKey: true };
+  }
+
+  const currTag = djb2Hash(secret).slice(0, 6);
+  if (currTag !== msgTag) {
+    return { text: "🔒 Encrypted Message (Incorrect Passphrase)", isEncrypted: true, wrongKey: true };
+  }
+
+  try {
+    const cipher = base64ToU8(b64);
+    const secBytes = new TextEncoder().encode(secret);
+    const plain = new Uint8Array(cipher.length);
+    for (let i = 0; i < cipher.length; i++) {
+      plain[i] = cipher[i] ^ secBytes[i % secBytes.length];
+    }
+    return { text: new TextDecoder().decode(plain), isEncrypted: true, wrongKey: false };
   } catch (e) {
-    return { text: "🔒 [Encrypted Message — Invalid Passphrase]", isEncrypted: true };
+    return { text: "🔒 Encrypted Message (Decryption Error)", isEncrypted: true, wrongKey: true };
   }
 }
 

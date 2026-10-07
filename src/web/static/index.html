@@ -146,7 +146,7 @@
               🖼️ Gallery
             </button>
             <button id="btn-header-encrypt" class="btn-action-secondary" onclick="openEncryptionModal()" title="Room Encryption">
-              🔒 Lock
+              <span id="encrypt-icon">🔓</span> <span id="encrypt-label">Lock</span>
             </button>
             <button id="btn-header-info" class="btn-action-secondary" onclick="showActivePeerInfo()" title="Peer & Connection Details">
               ℹ️ Info
@@ -376,6 +376,11 @@
           <input type="text" id="input-room-name" placeholder="e.g. project-dev, study-hub, gaming" maxlength="24" required autocomplete="off">
           <small class="field-hint">Creates a dedicated topic channel across all LAN peers</small>
         </div>
+        <div class="input-group">
+          <label for="input-room-passkey">🔒 Room Passphrase (Optional)</label>
+          <input type="password" id="input-room-passkey" placeholder="Leave empty for open, or set password..." autocomplete="off">
+          <small class="field-hint">Encrypts messages with end-to-end secret key</small>
+        </div>
         <div class="modal-footer">
           <button type="button" class="btn-secondary" onclick="closeRoomModal()">Cancel</button>
           <button type="submit" class="btn-primary">Create Room 🚀</button>
@@ -389,23 +394,26 @@
     <div class="glass-card modal-box-sm">
       <div class="modal-header">
         <div class="modal-title-group">
-          <h3>🔒 Room End-to-End Encryption</h3>
-          <p class="modal-subtitle">Secure channel messages with a shared symmetric key</p>
+          <h3 id="encryption-modal-title">🔒 Room Passphrase Lock</h3>
+          <p id="encryption-modal-target" class="modal-subtitle">Secure channel messages with a shared secret key</p>
         </div>
         <button class="modal-close-btn" onclick="closeEncryptionModal()">✕</button>
       </div>
       <div class="encryption-modal-body">
+        <div id="encryption-status-banner" class="encryption-status-banner inactive">
+          <span id="encryption-status-text">Room is currently unencrypted</span>
+        </div>
         <p class="encryption-info">
           When active, messages sent in this room are encrypted before leaving your browser. Only peers with the matching secret key can read them.
         </p>
         <div class="input-group">
-          <label for="input-room-secret">Room Secret Passphrase</label>
+          <label for="input-room-secret">Secret Passphrase for this Room</label>
           <input type="password" id="input-room-secret" placeholder="Enter secret passphrase..." autocomplete="off">
         </div>
       </div>
       <div class="modal-footer">
-        <button type="button" class="btn-secondary" onclick="disableRoomEncryption()">Disable Key</button>
-        <button type="button" class="btn-primary" onclick="saveRoomEncryption()">Apply Key 🔒</button>
+        <button type="button" class="btn-secondary" onclick="disableRoomEncryption()">Remove Lock 🔓</button>
+        <button type="button" class="btn-primary" onclick="saveRoomEncryption()">Apply Lock 🔒</button>
       </div>
     </div>
   </div>
@@ -774,7 +782,7 @@
               <div class="feature-card">
                 <span class="f-icon">🔐</span>
                 <div class="f-text">
-                  <h4>End-to-End Room Encryption</h4>
+                  <h4>End-to-End Encryption</h4>
                   <p>Set a custom secret passkey for private topic rooms so messages are encrypted before transmission across the wire.</p>
                 </div>
               </div>

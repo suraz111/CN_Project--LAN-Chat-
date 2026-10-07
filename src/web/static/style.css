@@ -1169,6 +1169,84 @@ body.theme-light * {
   transform: scale(0.94);
 }
 
+.btn-action-secondary.lock-active {
+  background: rgba(166, 227, 161, 0.18) !important;
+  border-color: var(--accent-green) !important;
+  color: var(--accent-green) !important;
+  font-weight: 700;
+}
+
+.btn-action-secondary.lock-active:hover {
+  background: rgba(166, 227, 161, 0.28) !important;
+  box-shadow: 0 0 10px rgba(166, 227, 161, 0.3);
+}
+
+.room-lock-tag {
+  font-size: 0.72rem;
+  margin-left: 3px;
+  opacity: 0.9;
+}
+
+.peer-item.has-lock .room-hash-avatar {
+  background: rgba(166, 227, 161, 0.15);
+  color: var(--accent-green);
+  border-color: rgba(166, 227, 161, 0.3);
+}
+
+.encryption-status-banner {
+  padding: 10px 14px;
+  border-radius: 12px;
+  font-size: 0.84rem;
+  font-weight: 700;
+  margin-bottom: 14px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.encryption-status-banner.active {
+  background: rgba(166, 227, 161, 0.15);
+  border: 1px solid var(--accent-green);
+  color: var(--accent-green);
+}
+
+.encryption-status-banner.inactive {
+  background: rgba(137, 180, 250, 0.12);
+  border: 1px solid rgba(137, 180, 250, 0.3);
+  color: var(--accent-blue);
+}
+
+.encrypted-locked-bubble {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 14px;
+  background: rgba(243, 139, 168, 0.1);
+  border: 1px dashed var(--accent-red);
+  border-radius: 12px;
+  color: var(--accent-red);
+  font-size: 0.86rem;
+  font-weight: 600;
+}
+
+.btn-bubble-unlock {
+  align-self: flex-start;
+  background: var(--accent-red);
+  color: #11111b;
+  border: none;
+  border-radius: 8px;
+  padding: 5px 12px;
+  font-size: 0.76rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.btn-bubble-unlock:hover {
+  opacity: 0.9;
+  transform: translateY(-1px);
+}
+
 /* ========================================================
    Direct P2P & Peer Info Modals
 ======================================================== */
