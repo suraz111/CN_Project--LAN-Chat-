@@ -93,6 +93,61 @@ html, body {
   font-size: 15px;
 }
 
+/* Custom Sleek Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.14);
+  border-radius: 6px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.28);
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.14) transparent;
+}
+
+body.theme-light ::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.16);
+}
+
+body.theme-light ::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.32);
+}
+
+body.theme-light * {
+  scrollbar-color: rgba(0, 0, 0, 0.16) transparent;
+}
+
+/* Chat Web Hyperlinks */
+.chat-web-link {
+  color: var(--accent-blue);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  word-break: break-all;
+  font-weight: 600;
+  transition: opacity var(--transition-speed);
+}
+
+.chat-web-link:hover {
+  opacity: 0.85;
+}
+
+.message-row.self .chat-web-link {
+  color: #ffffff;
+  text-decoration: underline;
+}
+
 /* ========================================================
    Global Utility Classes
 ======================================================== */

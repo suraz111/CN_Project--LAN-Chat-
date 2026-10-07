@@ -998,12 +998,17 @@ function appendMessageRow(msg) {
         .replace(new RegExp(`(?:Download\\s*\\/\\s*View:\\s*)?${escapeRegex(matchedUrl)}`, "g"), "")
         .trim();
     }
-    // 3. General Files / Documents
+    // 3. General Files vs Web Links
     else {
       messageContent = messageContent.replace(urlRegex, (url) => {
-        const cleanUrl = url.includes("/downloads/") ? "/downloads/" + url.split("/downloads/")[1] : url;
-        const dlFilename = decodeURIComponent(cleanUrl.split("/").pop());
-        return `<div class="file-card"><span class="file-icon">📎</span> <a href="${cleanUrl}" target="_blank" download class="file-link">Download ${escapeHtml(dlFilename)}</a></div>`;
+        const isDownloadFile = url.includes("/downloads/") || msg.category === "file";
+        if (isDownloadFile) {
+          const cleanUrl = url.includes("/downloads/") ? "/downloads/" + url.split("/downloads/")[1] : url;
+          const dlFilename = decodeURIComponent(cleanUrl.split("/").pop());
+          return `<div class="file-card"><span class="file-icon">📎</span> <a href="${cleanUrl}" target="_blank" download class="file-link">Download ${escapeHtml(dlFilename)}</a></div>`;
+        } else {
+          return `<a href="${url}" target="_blank" rel="noopener noreferrer" class="chat-web-link">${escapeHtml(url)}</a>`;
+        }
       });
       messageContent = messageContent.replace(/Download\s*\/\s*View:\s*/g, "").trim();
     }
