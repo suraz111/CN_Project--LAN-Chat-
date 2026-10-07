@@ -561,6 +561,14 @@ function initUserSession() {
   if (state.pendingAutoJoin) {
     const target = state.pendingAutoJoin;
     state.pendingAutoJoin = null;
+
+    // Clean query parameters from address bar to prevent infinite auto-join loops
+    if (window.history && window.history.replaceState) {
+      try {
+        window.history.replaceState({}, document.title, window.location.pathname);
+      } catch (e) {}
+    }
+
     if (target === "group") {
       selectChannel(null);
     } else {
@@ -713,9 +721,8 @@ async function fetchStatus() {
     if (!res.ok) return;
     const data = await res.json();
 
-    state.hostInfo = data;
-    // Auto-adopt remembered username from server if local session name is empty
-    if (!state.username && data.remembered_username) {
+    // Auto-adopt remembered username from server only if local session name is completely empty
+    if (!state.username && data.remembered_username && data.remembered_username !== "Mobile User") {
       saveUsername(data.remembered_username);
       initUserSession();
     }
@@ -1568,9 +1575,11 @@ async function joinRoomByName(roomName, isFromUrl = false) {
   if (!roomName) return;
   if (roomName.toLowerCase() === "group" || roomName === "Group Broadcast") {
     selectChannel(null);
-    if (isFromUrl) {
+    const groupNotifKey = "joined_group";
+    if (isFromUrl && !state.notifiedMessageIds.has(groupNotifKey)) {
+      state.notifiedMessageIds.add(groupNotifKey);
       showToastNotification({
-        id: "joined_" + Date.now(),
+        id: groupNotifKey,
         sender: "🎉 Joined Chat",
         message: "You connected to Group Broadcast via invitation link!",
         channel: "group",
@@ -1605,20 +1614,24 @@ async function joinRoomByName(roomName, isFromUrl = false) {
   renderCustomRooms();
   selectChannel(formatted);
 
-  if (isFromUrl) {
-    showToastNotification({
-      id: "joined_" + Date.now(),
-      sender: "🎉 Joined Room",
-      message: `You automatically joined ${formatted} via invitation link!`,
-      channel: formatted,
-    });
-  } else {
-    showToastNotification({
-      id: "joined_" + Date.now(),
-      sender: "🔑 Room Joined",
-      message: `Successfully connected to ${formatted}!`,
-      channel: formatted,
-    });
+  const joinNotifKey = `joined_${formatted}`;
+  if (!state.notifiedMessageIds.has(joinNotifKey)) {
+    state.notifiedMessageIds.add(joinNotifKey);
+    if (isFromUrl) {
+      showToastNotification({
+        id: joinNotifKey,
+        sender: "🎉 Joined Room",
+        message: `You automatically joined ${formatted} via invitation link!`,
+        channel: formatted,
+      });
+    } else {
+      showToastNotification({
+        id: joinNotifKey,
+        sender: "🔑 Room Joined",
+        message: `Successfully connected to ${formatted}!`,
+        channel: formatted,
+      });
+    }
   }
 }
 
@@ -1707,15 +1720,17 @@ function updateInviteUrl() {
   const selectedRoom = dom.inviteRoomSelect ? dom.inviteRoomSelect.value : (state.currentChannel || "group");
   const cleanRoom = selectedRoom.startsWith("#") ? selectedRoom.slice(1) : selectedRoom;
 
-  const port = window.location.port ? `:${window.location.port}` : ":8080";
   let hostAddress = "";
+  const isCloudHost = window.location.hostname !== "localhost" && window.location.hostname !== "127.0.0.1";
 
-  if (dom.inviteIpSelect && dom.inviteIpSelect.value) {
-    hostAddress = `${dom.inviteIpSelect.value}${port}`;
-  } else if (window.location.hostname !== "localhost" && window.location.hostname !== "127.0.0.1") {
+  if (isCloudHost) {
+    // Cloud / Reverse Proxy deployment (Render, custom domain): use host directly without :8080
     hostAddress = window.location.host;
   } else {
-    const ip = (state.hostInfo && (state.hostInfo.active_ip || state.hostInfo.host_ip)) || "127.0.0.1";
+    const port = window.location.port ? `:${window.location.port}` : ":8080";
+    const ip = (dom.inviteIpSelect && dom.inviteIpSelect.value)
+      || (state.hostInfo && (state.hostInfo.active_ip || state.hostInfo.host_ip))
+      || "127.0.0.1";
     hostAddress = `${ip}${port}`;
   }
 

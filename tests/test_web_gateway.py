@@ -296,6 +296,58 @@ class TestWebGateway(unittest.TestCase):
             data = json.loads(resp.read().decode("utf-8"))
             self.assertTrue(data.get("success"))
 
+    def test_multiple_clients_same_ip_coexist(self):
+        """Verify two devices connecting from the same IP (reverse proxy / NAT) both stay online."""
+        url_a = f"{self.base_url}/api/status?client_id=device_alpha&username=AlphaUser"
+        url_b = f"{self.base_url}/api/status?client_id=device_beta&username=BetaUser"
+
+        # Device Alpha connects
+        with urllib.request.urlopen(url_a) as resp:
+            self.assertEqual(resp.status, 200)
+
+        # Device Beta connects from same test IP (127.0.0.1)
+        with urllib.request.urlopen(url_b) as resp:
+            self.assertEqual(resp.status, 200)
+            data_b = json.loads(resp.read().decode("utf-8"))
+            # Device Beta should see AlphaUser in active peers!
+            peer_ids = [p["peer_id"] for p in data_b.get("active_peers", [])]
+            self.assertIn("device_alpha", peer_ids)
+
+        # Device Alpha connects again - BetaUser must STILL be present
+        with urllib.request.urlopen(url_a) as resp:
+            self.assertEqual(resp.status, 200)
+            data_a = json.loads(resp.read().decode("utf-8"))
+            peer_ids = [p["peer_id"] for p in data_a.get("active_peers", [])]
+            self.assertIn("device_beta", peer_ids)
+            # Alpha user should retain its own username, not Beta's
+            self.assertEqual(data_a.get("remembered_username"), "AlphaUser")
+
+    def test_notifications_delivered_once_without_loop(self):
+        """Verify status notifications are delivered once and not repeated infinitely."""
+        client_id = "test_loop_prevent_client"
+        status_url = f"{self.base_url}/api/status?client_id={client_id}&username=LoopTester"
+
+        # Baseline connection
+        with urllib.request.urlopen(status_url) as resp:
+            self.assertEqual(resp.status, 200)
+
+        time.sleep(0.05)
+        self.ctx._append_message(None, "SenderX", "Single alert test", category="peer", sender_id="remote_x")
+
+        # First poll: receives notification
+        with urllib.request.urlopen(status_url) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            notifs = data.get("notifications", [])
+            matching = [n for n in notifs if "Single alert test" in n.get("message", "")]
+            self.assertEqual(len(matching), 1)
+
+        # Second poll: notification must NOT be repeated!
+        with urllib.request.urlopen(status_url) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            notifs = data.get("notifications", [])
+            matching = [n for n in notifs if "Single alert test" in n.get("message", "")]
+            self.assertEqual(len(matching), 0, "Notification was repeated on second poll!")
+
 
 if __name__ == "__main__":
     unittest.main()

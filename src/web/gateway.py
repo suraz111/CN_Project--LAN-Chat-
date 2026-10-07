@@ -37,6 +37,13 @@ class WebGatewayHandler(http.server.BaseHTTPRequestHandler):
         """Suppress default HTTP access logs to keep terminal clean."""
         pass
 
+    def _get_client_ip(self) -> str:
+        """Extracts real client IP handling reverse proxies (Render, Cloudflare, Nginx)."""
+        xff = self.headers.get("X-Forwarded-For")
+        if xff:
+            return xff.split(",")[0].strip()
+        return self.client_address[0]
+
     def _send_json(self, data: Any, status: int = 200) -> None:
         """Sends a JSON response with proper CORS headers."""
         body = json.dumps(data).encode("utf-8")
@@ -240,9 +247,10 @@ class WebGatewayHandler(http.server.BaseHTTPRequestHandler):
             ctx = self.server.app_context
             client_id = query.get("client_id", [None])[0]
             client_name = query.get("username", ["Mobile User"])[0]
+            client_ip = self._get_client_ip()
 
             if client_id:
-                self.server.touch_client(client_id, client_name, self.client_address[0])
+                self.server.touch_client(client_id, client_name, client_ip)
 
             peers_list = []
 
@@ -307,6 +315,8 @@ class WebGatewayHandler(http.server.BaseHTTPRequestHandler):
             if client_id:
                 read_times = self.server.client_read_times.get(client_id, {})
                 connect_time = self.server.client_connect_times.get(client_id, 0.0)
+                last_notified = self.server.client_last_notified.get(client_id, connect_time)
+                notif_cutoff = max(connect_time, last_notified)
 
                 # 1. Group Broadcast messages (exclude system messages)
                 group_last_read = read_times.get(None, 0.0)
@@ -318,7 +328,7 @@ class WebGatewayHandler(http.server.BaseHTTPRequestHandler):
                     and m.get("category") != "system"
                 ]
                 unreads["group"] = len(new_group)
-                notify_group = [m for m in new_group if m.get("timestamp_epoch", 0) > connect_time]
+                notify_group = [m for m in new_group if m.get("timestamp_epoch", 0) > notif_cutoff]
                 for m in notify_group[-5:]:
                     notifications.append({
                         "id": m.get("id") or f"{m.get('timestamp_epoch')}_{m.get('sender')}",
@@ -341,7 +351,7 @@ class WebGatewayHandler(http.server.BaseHTTPRequestHandler):
                     and m.get("category") != "system"
                 ]
                 unreads[ctx.peer_id] = len(new_host)
-                notify_host = [m for m in new_host if m.get("timestamp_epoch", 0) > connect_time]
+                notify_host = [m for m in new_host if m.get("timestamp_epoch", 0) > notif_cutoff]
                 for m in notify_host[-5:]:
                     notifications.append({
                         "id": m.get("id") or f"{m.get('timestamp_epoch')}_{m.get('sender')}",
@@ -355,7 +365,7 @@ class WebGatewayHandler(http.server.BaseHTTPRequestHandler):
                     })
 
                 # 3. Private DMs from other Web Clients
-                for cid in self.server.web_clients:
+                for cid in list(self.server.web_clients.keys()):
                     if cid != client_id:
                         dm_k = f"dm_{min(client_id, cid)}_{max(client_id, cid)}"
                         cid_last_read = read_times.get(cid, 0.0)
@@ -367,8 +377,9 @@ class WebGatewayHandler(http.server.BaseHTTPRequestHandler):
                             and m.get("category") != "system"
                         ]
                         unreads[cid] = len(new_cid)
-                        other_name = self.server.web_clients[cid].get("username", "Peer")
-                        notify_cid = [m for m in new_cid if m.get("timestamp_epoch", 0) > connect_time]
+                        other_info = self.server.web_clients.get(cid, {})
+                        other_name = other_info.get("username", "Peer")
+                        notify_cid = [m for m in new_cid if m.get("timestamp_epoch", 0) > notif_cutoff]
                         for m in notify_cid[-5:]:
                             notifications.append({
                                 "id": m.get("id") or f"{m.get('timestamp_epoch')}_{m.get('sender')}",
@@ -395,7 +406,7 @@ class WebGatewayHandler(http.server.BaseHTTPRequestHandler):
                     ]
                     if new_p:
                         unreads[pid] = len(new_p)
-                        notify_p = [m for m in new_p if m.get("timestamp_epoch", 0) > connect_time]
+                        notify_p = [m for m in new_p if m.get("timestamp_epoch", 0) > notif_cutoff]
                         for m in notify_p[-5:]:
                             notifications.append({
                                 "id": m.get("id") or f"{m.get('timestamp_epoch')}_{m.get('sender')}",
@@ -419,7 +430,7 @@ class WebGatewayHandler(http.server.BaseHTTPRequestHandler):
                         and m.get("category") != "system"
                     ]
                     unreads[r_name] = len(new_r)
-                    notify_r = [m for m in new_r if m.get("timestamp_epoch", 0) > connect_time]
+                    notify_r = [m for m in new_r if m.get("timestamp_epoch", 0) > notif_cutoff]
                     for m in notify_r[-5:]:
                         notifications.append({
                             "id": m.get("id") or f"{m.get('timestamp_epoch')}_{m.get('sender')}",
@@ -431,6 +442,11 @@ class WebGatewayHandler(http.server.BaseHTTPRequestHandler):
                             "category": m.get("category", "chat"),
                             "is_dm": False,
                         })
+
+                # Advance client_last_notified so these notifications are delivered only once
+                if notifications:
+                    max_notif_ts = max(n.get("timestamp_epoch", time.time()) for n in notifications)
+                    self.server.client_last_notified[client_id] = max_notif_ts
 
             active_ip = get_local_ip()
             if not active_ip.startswith("127."):
@@ -454,8 +470,8 @@ class WebGatewayHandler(http.server.BaseHTTPRequestHandler):
                     "unreads": unreads,
                     "notifications": notifications,
                     "interfaces": get_all_network_interfaces(),
-                    "remembered_username": self.server.ip_saved_names.get(self.client_address[0], ""),
-                    "remembered_client_id": self.server.ip_client_ids.get(self.client_address[0], ""),
+                    "remembered_username": self.server.client_saved_names.get(client_id, "") if client_id else "",
+                    "remembered_client_id": client_id or "",
                 }
             )
             return
@@ -476,7 +492,7 @@ class WebGatewayHandler(http.server.BaseHTTPRequestHandler):
             # Keep client activity alive and mark channel as read
             if client_id:
                 client_name = query.get("username", ["Mobile User"])[0]
-                self.server.touch_client(client_id, client_name, self.client_address[0])
+                self.server.touch_client(client_id, client_name, self._get_client_ip())
                 self.server.mark_read(client_id, channel_id)
 
             # Resolve history storage key:
@@ -606,7 +622,7 @@ class WebGatewayHandler(http.server.BaseHTTPRequestHandler):
                 self._send_json({"success": False, "error": "Empty message"}, status=400)
                 return
 
-            self.server.touch_client(client_id, sender_name, self.client_address[0])
+            self.server.touch_client(client_id, sender_name, self._get_client_ip())
 
             now = time.time()
             timestamp_str = time.strftime("%H:%M:%S", time.localtime(now))
@@ -729,7 +745,7 @@ class WebGatewayHandler(http.server.BaseHTTPRequestHandler):
             raw_channel = data.get("channel")
             channel_id = None if raw_channel in (None, "", "null", "group") else raw_channel
 
-            self.server.touch_client(client_id, sender_name, self.client_address[0])
+            self.server.touch_client(client_id, sender_name, self._get_client_ip())
 
             packet = Packet(
                 type=MessageType.TYPING,
@@ -809,7 +825,7 @@ class WebGatewayHandler(http.server.BaseHTTPRequestHandler):
                 if not client_id:
                     client_id = f"mob_{ctx.peer_id[:4]}"
 
-                self.server.touch_client(client_id, sender_name, self.client_address[0])
+                self.server.touch_client(client_id, sender_name, self._get_client_ip())
 
                 if file_bytes is None or not original_filename:
                     self._send_json({"success": False, "error": "No file uploaded"}, status=400)
@@ -1109,38 +1125,30 @@ class WebGatewayServer(http.server.ThreadingHTTPServer):
         self.clients_lock = threading.Lock()
         self.client_read_times: Dict[str, Dict[Any, float]] = {}
         self.client_connect_times: Dict[str, float] = {}
+        self.client_last_notified: Dict[str, float] = {}
+        self.client_saved_names: Dict[str, str] = {}
         self.ip_saved_names: Dict[str, str] = {}
         self.ip_client_ids: Dict[str, str] = {}
 
     def touch_client(self, client_id: str, username: str, ip_address: str) -> None:
-        """Records or updates a web client's presence and prevents duplicate entries from the same device IP."""
+        """Records or updates a web client's presence by unique client_id without evicting peers sharing an IP/proxy."""
+        if not client_id:
+            return
         now = time.time()
-        replaced_id = None
         with self.clients_lock:
-            # Check if this IP address already has an active client under a different session ID
-            for existing_id, existing_info in list(self.web_clients.items()):
-                if existing_info.get("ip_address") == ip_address and existing_id != client_id:
-                    replaced_id = existing_id
-                    del self.web_clients[existing_id]
-                    if existing_id in self.client_read_times:
-                        del self.client_read_times[existing_id]
-                    if existing_id in self.client_connect_times:
-                        del self.client_connect_times[existing_id]
-                    break
-
-            # If user had a previously set custom name for this device IP, restore it if incoming is default
-            if username in ("Mobile User", "Peer", "", None) and ip_address in self.ip_saved_names:
-                username = self.ip_saved_names[ip_address]
+            # If user had a previously set custom name for this client_id, restore it if incoming is default
+            if username in ("Mobile User", "Peer", "", None) and client_id in self.client_saved_names:
+                username = self.client_saved_names[client_id]
             elif username and username not in ("Mobile User", "Peer"):
-                self.ip_saved_names[ip_address] = username
-
-            self.ip_client_ids[ip_address] = client_id
+                self.client_saved_names[client_id] = username
 
             if client_id not in self.client_connect_times:
                 self.client_connect_times[client_id] = now
+                self.client_last_notified[client_id] = now
 
             if client_id not in self.client_read_times:
                 self.client_read_times[client_id] = {}
+
             self.web_clients[client_id] = {
                 "client_id": client_id,
                 "username": username,
@@ -1148,9 +1156,6 @@ class WebGatewayServer(http.server.ThreadingHTTPServer):
                 "ip_address": ip_address,
                 "last_seen": now,
             }
-
-        if replaced_id and hasattr(self.app_context, "remove_web_peer"):
-            self.app_context.remove_web_peer(replaced_id)
 
         if hasattr(self.app_context, "register_web_peer"):
             self.app_context.register_web_peer(client_id, username, ip_address)
@@ -1164,14 +1169,17 @@ class WebGatewayServer(http.server.ThreadingHTTPServer):
             self.client_read_times[client_id][channel_id] = now
 
     def prune_dead_clients(self) -> None:
-        """Removes web clients that haven't sent a heartbeat/poll for > 15s."""
+        """Removes web clients that haven't sent a heartbeat/poll for > 30s."""
         now = time.time()
         dead = []
         with self.clients_lock:
             for cid, info in list(self.web_clients.items()):
-                if now - info["last_seen"] > 15.0:
+                if now - info["last_seen"] > 30.0:
                     dead.append(cid)
                     del self.web_clients[cid]
+                    self.client_read_times.pop(cid, None)
+                    self.client_connect_times.pop(cid, None)
+                    self.client_last_notified.pop(cid, None)
 
         for cid in dead:
             if hasattr(self.app_context, "remove_web_peer"):
