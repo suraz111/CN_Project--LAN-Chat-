@@ -2517,8 +2517,9 @@ body.theme-light * {
 }
 
 .qr-canvas-wrapper {
-  width: 170px;
-  height: 170px;
+  width: 185px;
+  height: 185px;
+  min-width: 185px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -2537,6 +2538,63 @@ body.theme-light * {
   color: #585b70;
   margin-top: 8px;
   text-align: center;
+}
+
+.invite-network-code-box {
+  margin-top: 12px;
+  width: 100%;
+  max-width: 215px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: var(--bg-surface-elevated, #181825);
+  border: 1px solid var(--border-color, rgba(255, 255, 255, 0.1));
+  padding: 8px 10px;
+  border-radius: 12px;
+  gap: 8px;
+  box-sizing: border-box;
+}
+
+.code-badge-left {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.code-badge-lbl {
+  font-size: 0.64rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-muted, #a6adc8);
+}
+
+.code-badge-val {
+  font-size: 0.88rem;
+  font-weight: 800;
+  font-family: var(--font-mono, monospace);
+  color: var(--accent-blue, #89b4fa);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.btn-copy-code-chip {
+  background: rgba(137, 180, 250, 0.14);
+  color: var(--accent-blue, #89b4fa);
+  border: 1px solid rgba(137, 180, 250, 0.28);
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 5px 9px;
+  border-radius: 8px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.2s ease;
+}
+
+.btn-copy-code-chip:hover {
+  background: var(--accent-blue, #89b4fa);
+  color: #11111b;
 }
 
 .invite-details-section {

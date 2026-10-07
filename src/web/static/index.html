@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="style.css?v=1.0.2">
+  <link rel="stylesheet" href="style.css?v=1.0.4">
 </head>
 <body class="theme-dark">
   <!-- Audio element fallback (Web Audio API synthesizer used as primary) -->
@@ -513,6 +513,16 @@
             </div>
             <span class="qr-caption">📱 Scan with phone camera</span>
           </div>
+
+          <div class="invite-network-code-box">
+            <div class="code-badge-left">
+              <span class="code-badge-lbl">Network Code</span>
+              <strong id="invite-network-code-display" class="code-badge-val">NET-XXXXXX</strong>
+            </div>
+            <button type="button" id="btn-copy-net-code" class="btn-copy-code-chip" onclick="copyNetworkCodeOnly()" title="Copy Network Code">
+              <span>📋 Copy</span>
+            </button>
+          </div>
         </div>
 
         <!-- Right: Links & 1-Click Sharing Platforms -->
@@ -885,6 +895,6 @@
   <!-- Toast Notification Stream for Incoming DMs across channels -->
   <div id="toast-container" class="toast-container"></div>
 
-  <script src="app.js?v=1.0.2"></script>
+  <script src="app.js?v=1.0.4"></script>
 </body>
 </html>

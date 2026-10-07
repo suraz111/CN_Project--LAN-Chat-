@@ -62,13 +62,16 @@ const QR = (() => {
     { v: 1, size: 21, total: 26, data: 19, ec: 7, blocks: 1, align: [] },
     { v: 2, size: 25, total: 44, data: 34, ec: 10, blocks: 1, align: [6, 18] },
     { v: 3, size: 29, total: 70, data: 55, ec: 15, blocks: 1, align: [6, 22] },
-    { v: 4, size: 33, total: 100, data: 80, ec: 20, blocks: 2, align: [6, 26] },
-    { v: 5, size: 37, total: 134, data: 108, ec: 26, blocks: 2, align: [6, 30] },
-    { v: 6, size: 41, total: 172, data: 136, ec: 36, blocks: 4, align: [6, 34] },
+    { v: 4, size: 33, total: 100, data: 80, ec: 20, blocks: 1, align: [6, 26] },
+    { v: 5, size: 37, total: 134, data: 108, ec: 26, blocks: 1, align: [6, 30] },
+    { v: 6, size: 41, total: 172, data: 136, ec: 36, blocks: 2, align: [6, 34] },
   ];
 
   function encodeData(text, vInfo) {
-    const bytes = new TextEncoder().encode(text);
+    let bytes = new TextEncoder().encode(text);
+    if (bytes.length > vInfo.data - 2) {
+      bytes = bytes.slice(0, vInfo.data - 2);
+    }
     const bitBuf = [];
 
     function pushBits(val, len) {
@@ -237,7 +240,7 @@ const QR = (() => {
     return matrix;
   }
 
-  function generateSVG(text, margin = 3) {
+  function generateSVG(text, margin = 4) {
     const byteLen = new TextEncoder().encode(text).length;
     let chosenVersion = null;
     for (const v of VERSIONS) {
@@ -257,12 +260,12 @@ const QR = (() => {
     for (let r = 0; r < size; r++) {
       for (let c = 0; c < size; c++) {
         if (matrix[r][c] === 1) {
-          paths += `<rect x="${c + margin}" y="${r + margin}" width="1" height="1" fill="currentColor"/>`;
+          paths += `<rect x="${c + margin}" y="${r + margin}" width="1" height="1" fill="#0b0f19"/>`;
         }
       }
     }
 
-    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${fullSize} ${fullSize}" shape-rendering="crispEdges" class="qr-svg">${paths}</svg>`;
+    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${fullSize} ${fullSize}" shape-rendering="crispEdges" class="qr-svg"><rect width="${fullSize}" height="${fullSize}" fill="#ffffff"/>${paths}</svg>`;
   }
 
   return { generateSVG };
@@ -504,11 +507,16 @@ window.addEventListener("DOMContentLoaded", () => {
   document.addEventListener("click", () => requestNotificationPermission(), { once: true });
 
   if (dom.loginModal) dom.loginModal.classList.add("hidden");
-  if (state.username) initUserSession();
 
-  // Landing page is fixed to Guide Page on page load / link navigation
+  // If user already has a saved username, initialize session immediately:
+  if (state.username) {
+    initUserSession();
+  }
+
+  // Guide / Landing page handling:
+  // If user does not have a username yet (e.g. mobile scanning QR for first time) or first visit, show Landing / Guide modal
   const shouldSkipLanding = false;
-  if (!state.pendingAutoJoin && !shouldSkipLanding) {
+  if (!state.username || (!state.pendingNetworkInvite && !state.pendingAutoJoin && !shouldSkipLanding)) {
     openLandingModal();
   }
 
@@ -605,10 +613,26 @@ function setupEventHandlers() {
   }
 }
 
-function initUserSession() {
+async function initUserSession() {
   dom.userDisplayName.textContent = state.username;
   dom.userAvatarText.textContent = (state.username || "M").slice(0, 1).toUpperCase();
   dom.loginModal.classList.add("hidden");
+
+  // If opening via a QR invite link and pendingNetworkInvite is present:
+  if (state.pendingNetworkInvite) {
+    const netCode = state.pendingNetworkInvite;
+    state.pendingNetworkInvite = null;
+    await joinNetwork(netCode, state.username);
+
+    // Clean query parameters from address bar to prevent repeated joins on refresh
+    if (window.history && window.history.replaceState) {
+      try {
+        window.history.replaceState({}, document.title, window.location.pathname);
+      } catch (e) {}
+    }
+    return;
+  }
+
   fetchStatus();
 
   // Auto-join room from URL link if present
@@ -785,6 +809,7 @@ async function fetchStatus() {
     const res = await fetch(url);
     if (!res.ok) return;
     const data = await res.json();
+    state.hostInfo = data;
 
     if (data.network_id && data.network_id !== state.networkId) {
       state.networkId = data.network_id;
@@ -1847,8 +1872,12 @@ async function joinRoomByName(roomName, isFromUrl = false) {
 // ========================================================
 // Invite & 1-Click Share Modal (with Live QR Code)
 // ========================================================
-function openInviteModal(preselectedRoom) {
+async function openInviteModal(preselectedRoom) {
   if (!dom.inviteModal) return;
+
+  if (!state.networkId) {
+    await createPersonalNetwork();
+  }
 
   const targetRoom = (typeof preselectedRoom === "string" && preselectedRoom)
     ? preselectedRoom
@@ -1875,40 +1904,78 @@ function openInviteModal(preselectedRoom) {
     dom.inviteRoomSelect.appendChild(optGroup);
   }
 
-  // Populate network adapters dropdown
+  // Ensure host network information is loaded
+  if (!state.hostInfo || !state.hostInfo.host_ip) {
+    await fetchStatus();
+  }
+
+  // Populate network adapters dropdown (prioritizing LAN network IP addresses)
   if (dom.inviteIpSelect) {
     dom.inviteIpSelect.innerHTML = "";
-    const ipSet = new Set();
+    const ipEntries = [];
+    const seenIps = new Set();
 
-    if (window.location.hostname !== "localhost" && window.location.hostname !== "127.0.0.1") {
-      ipSet.add(window.location.hostname);
-    }
-    if (state.hostInfo && state.hostInfo.active_ip) {
-      ipSet.add(state.hostInfo.active_ip);
-    }
-    if (state.hostInfo && state.hostInfo.host_ip && state.hostInfo.host_ip !== "127.0.0.1") {
-      ipSet.add(state.hostInfo.host_ip);
-    }
+    // 1. Gather all active network interface IPs from host status
     const ifaces = (state.hostInfo && state.hostInfo.interfaces) || [];
     ifaces.forEach((iface) => {
-      if (iface.ip && iface.ip !== "127.0.0.1") {
-        ipSet.add(iface.ip);
+      if (iface.ip && iface.ip !== "127.0.0.1" && !seenIps.has(iface.ip)) {
+        seenIps.add(iface.ip);
+        ipEntries.push({
+          val: iface.ip,
+          label: `📶 ${iface.name || "LAN Adapter"} (${iface.ip})`,
+          isPrimary: Boolean(iface.is_primary),
+          isLan: true,
+        });
       }
     });
 
-    if (ipSet.size === 0) {
-      ipSet.add(window.location.hostname || "127.0.0.1");
+    // 2. Add primary host_ip / local_ip if not already in list
+    const hostIp = state.hostInfo && (state.hostInfo.host_ip || state.hostInfo.local_ip);
+    if (hostIp && hostIp !== "127.0.0.1" && !seenIps.has(hostIp)) {
+      seenIps.add(hostIp);
+      ipEntries.unshift({
+        val: hostIp,
+        label: `📶 Local LAN (${hostIp})`,
+        isPrimary: true,
+        isLan: true,
+      });
     }
 
-    const preferredIp = (window.location.hostname !== "localhost" && window.location.hostname !== "127.0.0.1")
-      ? window.location.hostname
-      : (state.hostInfo && (state.hostInfo.active_ip || state.hostInfo.host_ip));
+    // 3. Fallback to 127.0.0.1 if no other LAN IPs exist
+    if (ipEntries.length === 0) {
+      ipEntries.push({
+        val: "127.0.0.1",
+        label: "📶 Localhost (127.0.0.1)",
+        isPrimary: true,
+        isLan: true,
+      });
+    }
 
-    ipSet.forEach((ip) => {
+    // 4. Optionally add public web domain as alternative option
+    if (window.location.hostname !== "localhost" && window.location.hostname !== "127.0.0.1" && !seenIps.has(window.location.host)) {
+      ipEntries.push({
+        val: window.location.host,
+        label: `🌐 Web Domain (${window.location.host})`,
+        isPrimary: false,
+        isLan: false,
+      });
+    }
+
+    // Always prefer the primary LAN network IP
+    let preferredVal = null;
+    const primaryEntry = ipEntries.find((e) => e.isPrimary && e.isLan);
+    if (primaryEntry) {
+      preferredVal = primaryEntry.val;
+    } else {
+      const anyLan = ipEntries.find((e) => e.isLan);
+      preferredVal = anyLan ? anyLan.val : ipEntries[0].val;
+    }
+
+    ipEntries.forEach((entry) => {
       const opt = document.createElement("option");
-      opt.value = ip;
-      opt.textContent = `📶 ${ip}`;
-      if (ip === preferredIp) {
+      opt.value = entry.val;
+      opt.textContent = entry.label;
+      if (entry.val === preferredVal) {
         opt.selected = true;
       }
       dom.inviteIpSelect.appendChild(opt);
@@ -1929,21 +1996,28 @@ function updateInviteUrl() {
   const selectedRoom = dom.inviteRoomSelect ? dom.inviteRoomSelect.value : (state.currentChannel || "group");
   const cleanRoom = selectedRoom.startsWith("#") ? selectedRoom.slice(1) : selectedRoom;
 
-  let hostAddress = "";
-  const isCloudHost = window.location.hostname !== "localhost" && window.location.hostname !== "127.0.0.1";
+  const selectedTarget = (dom.inviteIpSelect && dom.inviteIpSelect.value)
+    || (state.hostInfo && (state.hostInfo.host_ip || state.hostInfo.local_ip))
+    || "127.0.0.1";
 
-  if (isCloudHost) {
-    // Cloud / Reverse Proxy deployment (Render, custom domain): use host directly without :8080
-    hostAddress = window.location.host;
+  // Determine port and protocol based on the selected target
+  let protocol = "http:";
+  let hostAddress = "";
+
+  const isIpv4 = /^(\d{1,3}\.){3}\d{1,3}/.test(selectedTarget);
+  if (!isIpv4 && selectedTarget.includes(".") && /[a-zA-Z]/.test(selectedTarget)) {
+    // Cloud / Web Domain (e.g. cn-project-lan-chat.onrender.com)
+    protocol = window.location.protocol || "https:";
+    hostAddress = selectedTarget;
   } else {
-    const port = window.location.port ? `:${window.location.port}` : ":8080";
-    const ip = (dom.inviteIpSelect && dom.inviteIpSelect.value)
-      || (state.hostInfo && (state.hostInfo.active_ip || state.hostInfo.host_ip))
-      || "127.0.0.1";
-    hostAddress = `${ip}${port}`;
+    // LAN / Network IP Address (e.g. 10.85.123.11 or 192.168.1.50)
+    protocol = "http:"; // Local LAN IPs ALWAYS use http:
+    const webPort = (state.hostInfo && state.hostInfo.web_port)
+      || (window.location.port ? window.location.port : "8080");
+    const portStr = selectedTarget.includes(":") ? "" : `:${webPort}`;
+    hostAddress = `${selectedTarget}${portStr}`;
   }
 
-  const protocol = window.location.protocol || "http:";
   const queryParts = [];
   if (cleanRoom && cleanRoom !== "group") {
     queryParts.push(`room=${encodeURIComponent(cleanRoom)}`);
@@ -1959,8 +2033,42 @@ function updateInviteUrl() {
   }
 
   if (dom.inviteQrContainer) {
-    dom.inviteQrContainer.innerHTML = QR.generateSVG(url, 2);
+    dom.inviteQrContainer.innerHTML = QR.generateSVG(url, 4);
   }
+
+  const codeDisplay = document.getElementById("invite-network-code-display");
+  if (codeDisplay) {
+    codeDisplay.textContent = state.networkId || "OFFLINE";
+  }
+}
+
+async function copyNetworkCodeOnly() {
+  const code = state.networkId;
+  if (!code) return;
+  try {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      await navigator.clipboard.writeText(code);
+    } else {
+      const input = document.createElement("input");
+      input.value = code;
+      document.body.appendChild(input);
+      input.select();
+      document.execCommand("copy");
+      document.body.removeChild(input);
+    }
+    const btn = document.getElementById("btn-copy-net-code");
+    if (btn) {
+      const orig = btn.innerHTML;
+      btn.innerHTML = "<span>✅ Copied!</span>";
+      setTimeout(() => { btn.innerHTML = orig; }, 2000);
+    }
+    showToastNotification({
+      id: "toast_code_" + Date.now(),
+      sender: "📋 Code Copied",
+      message: `Network code ${code} copied to clipboard!`,
+      channel: null,
+    });
+  } catch (err) {}
 }
 
 async function copyInviteLink() {
@@ -2112,19 +2220,27 @@ async function startPersonalNetworkFromLanding() {
   const enteredName = dom.landingInputNickname ? dom.landingInputNickname.value.trim() : "";
   if (enteredName) {
     saveUsername(enteredName);
-    initUserSession();
+    dom.userDisplayName.textContent = state.username;
+    dom.userAvatarText.textContent = (state.username || "M").slice(0, 1).toUpperCase();
   } else if (!state.username) {
     const defaultName = "Peer-" + Math.floor(1000 + Math.random() * 9000);
     saveUsername(defaultName);
-    initUserSession();
+    dom.userDisplayName.textContent = state.username;
+    dom.userAvatarText.textContent = (state.username || "M").slice(0, 1).toUpperCase();
   }
 
   closeLandingModal(true);
   localStorage.setItem("lanchat_visited", "true");
 
   if (state.pendingNetworkInvite) {
-    await joinNetwork(state.pendingNetworkInvite, state.username);
+    const netCode = state.pendingNetworkInvite;
     state.pendingNetworkInvite = null;
+    await joinNetwork(netCode, state.username);
+    if (window.history && window.history.replaceState) {
+      try {
+        window.history.replaceState({}, document.title, window.location.pathname);
+      } catch (e) {}
+    }
   } else if (!state.networkId) {
     await createPersonalNetwork();
   } else {
@@ -2242,6 +2358,21 @@ async function joinNetwork(networkCode, nickname = null) {
     updateNetworkUI();
     closeJoinNetworkModal();
     await fetchStatus();
+
+    // Auto-select room after joining network:
+    if (state.pendingAutoJoin) {
+      const target = state.pendingAutoJoin;
+      state.pendingAutoJoin = null;
+      if (target === "group") {
+        selectChannel("group");
+      } else {
+        joinRoomByName(target, true);
+      }
+    } else if (state.customRooms && state.customRooms.length > 0) {
+      selectChannel(state.customRooms[0]);
+    } else {
+      joinRoomByName("#general", true);
+    }
 
     showToastNotification({
       id: "toast_net_joined_" + Date.now(),

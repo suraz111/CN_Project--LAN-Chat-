@@ -509,6 +509,7 @@ class WebGatewayHandler(http.server.BaseHTTPRequestHandler):
                     "local_ip": ctx.local_ip,
                     "host_port": ctx.actual_tcp_port,
                     "tcp_port": ctx.actual_tcp_port,
+                    "web_port": self.server.server_address[1] if (hasattr(self.server, "server_address") and isinstance(self.server.server_address, tuple) and len(self.server.server_address) > 1) else getattr(ctx, "web_port", 8080),
                     "peer_id": ctx.peer_id,
                     "active_peers": peers_list,
                     "peers": peers_list,
