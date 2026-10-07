@@ -1,4 +1,4 @@
-# 📡 Simple LAN Chat
+# 📡 LAN Chat — Offline-First P2P Messenger
 
 <p align="center">
   <img src="https://img.shields.io/badge/Python-3.10%2B-blue?logo=python&logoColor=white" alt="Python 3.10+">
@@ -6,7 +6,7 @@
   <img src="https://img.shields.io/badge/Transport-TCP%20%7C%20UDP-green" alt="TCP / UDP">
   <img src="https://img.shields.io/badge/GUI-Tkinter%20(Catppuccin)-purple" alt="Tkinter GUI">
   <img src="https://img.shields.io/badge/Dependencies-Zero%20External-success" alt="Zero Dependencies">
-  <img src="https://img.shields.io/badge/Tests-48%20Passed-brightgreen" alt="48 Tests Passed">
+  <img src="https://img.shields.io/badge/Tests-61%20Passed-brightgreen" alt="61 Tests Passed">
   <img src="https://img.shields.io/badge/License-MIT-lightgrey" alt="License MIT">
 </p>
 
@@ -17,7 +17,7 @@
 </p>
 
 <p align="center">
-  <strong>A lightweight, zero-configuration Peer-to-Peer (P2P) desktop chat and file-sharing application designed for Local Area Networks (LAN), featuring a 24/7 cloud gateway and mobile web client.</strong>
+  <strong>A lightweight, zero-configuration offline-first LAN chat platform. Works completely without the internet — just connect to the same Wi-Fi and start chatting via QR code or Network Code invite.</strong>
 </p>
 
 <p align="center">
@@ -61,18 +61,19 @@ You can try the live application right now without installing anything:
 
 ## 🌟 Features Overview
 
-- 🔍 **Decentralized Auto-Discovery:** Discovers peers dynamically across the local subnet using periodic UDP broadcast heartbeats on port `50000` with zero server configuration.
-- 💬 **Multi-Channel & Custom Topic Rooms:** Seamlessly switch between global **Group Broadcast Room**, custom topic channels (`#general`, `#project`, `#study`), and private **1-on-1 Direct Messaging (DM)**.
+- 🔍 **Decentralized Auto-Discovery:** Discovers peers automatically on the LAN using UDP broadcast heartbeats on port `50000` — zero server configuration required.
+- 🔗 **QR Code & Network Code Invite System:** The host generates a scannable QR code and 6-character Network Code (e.g. `NET-A3F7C1`). Guests scan the QR code or paste the URL to join instantly.
+- 💬 **Private Isolated Networks:** Each host creates an isolated network session. Only users who explicitly join a network (via QR / Network Code / direct URL) can see its rooms and messages.
+- 🏠 **Dynamic Room Creation:** Users create named rooms (e.g. `#classroom`, `#study`) on demand. No preconfigured channels clutter the interface.
+- 🖼️ **Image Lightbox & Shared Media Gallery:** Clickable image preview thumbnails with full-screen Lightbox zoom and in-app categorized Media Gallery.
+- 📥 **Drag-and-Drop File Sharing:** Smooth drag-and-drop file upload overlay with animated percentage transfer progress bars and SHA-256 integrity verification.
+- 📌 **Sticky Pinned Messages & Live Search:** Pin critical announcements to the top of any channel and filter conversations with real-time text matching.
 - 🎙️ **Voice Notes Recording & Playback:** Native in-browser audio recording via Web Audio and MediaRecorder with inline responsive audio player.
 - 👍 **Live Emoji Message Reactions:** Interactive reaction bar (👍, ❤️, 😂, 🔥) with toggleable participant badge pills.
-- 🖼️ **Image Lightbox & Shared Media Gallery:** Clickable image preview thumbnails with full-screen Lightbox zoom and in-app categorized Media Gallery.
-- 📥 **Drag-and-Drop Sharing with Progress Trackers:** Smooth drag-and-drop file upload overlay with animated percentage transfer progress bars.
-- 📌 **Sticky Pinned Messages & Live Search:** Pin critical announcements to the top of any channel and filter conversations with real-time text matching.
-- 🔐 **End-to-End Room Encryption:** Optional symmetric passkey encryption for private rooms with zero external dependencies.
-- 🌐 **Network Adapters & Port Diagnostics:** Enumerates all active local interfaces (Wi-Fi, Ethernet, Hotspot, Loopback) in the Direct P2P Hub.
-- 📱 **Zero-Install Mobile Web Client:** Any smartphone (iOS / Android), tablet, or secondary laptop on the same Wi-Fi can join instantly via browser at `http://<local_ip>:8080`.
-- 📁 **High-Speed Binary File Transfer:** Chunked socket streaming with **SHA-256 checksum integrity verification**, transfer progress bars, and an in-app received files viewer.
-- 🎨 **Modern Catppuccin Themes:** Sleek dark mode (Catppuccin Mocha) and crisp light mode with dynamic theme toggle and glassmorphism accents.
+- 🌐 **Multi-Interface IP Selection:** Enumerates all active local interfaces (Wi-Fi, Ethernet, Mobile Hotspot) to generate the correct LAN invite URL.
+- 📱 **Zero-Install Mobile Web Client:** Any smartphone (iOS / Android), tablet, or secondary laptop on the same Wi-Fi can join instantly via browser — no app required.
+- 📁 **High-Speed Binary File Transfer:** Chunked TCP socket streaming with SHA-256 checksum integrity verification.
+- 🎨 **Glassmorphism Dark UI:** Premium dark mode interface with glassmorphism accents and smooth micro-animations.
 - 🔒 **Zero External Dependencies:** Built strictly using the Python Standard Library (`socket`, `select`, `threading`, `http.server`, `tkinter`).
 
 ---
@@ -147,23 +148,31 @@ You can connect your **Android phone**, **iPhone**, **iPad**, or another laptop 
 > **Global 24/7 Cloud Access:** You can instantly access the live cloud-hosted app from anywhere at **[https://cn-project-lan-chat.onrender.com](https://cn-project-lan-chat.onrender.com)**.  
 > Follow the steps below if you want to run your own **private offline local Wi-Fi LAN** instance.
 
-### Connecting Your Phone
+### Connecting Your Phone / Tablet
 
-1. Start the desktop application on your computer (`python main.py`).
-2. Notice your local Web Gateway URL displayed in the header or click **`📱 Mobile Web`** (e.g., `http://192.168.1.100:8080`).
-3. Open **Chrome**, **Safari**, or **Firefox** on your phone.
-4. Type the exact address including `http://`:
-   ```text
-   http://<your_computer_ip>:8080
-   ```
-5. Enter your display name and tap **Join LAN Chat**. You can now exchange text messages, receive desktop alerts, and upload photos directly to the LAN network!
+#### Method 1 — QR Code (Easiest)
+1. Start the web gateway on your computer: `python web_main.py`.
+2. Open the app in **your own browser** at `http://localhost:8080`, set your nickname and create your network.
+3. Click the **🔗 Invite** button in the top navigation bar.
+4. A QR code is generated pointing to the **local LAN IP** of your machine.
+5. Scan the QR code with any phone camera — the phone's browser opens and auto-joins the network.
+
+#### Method 2 — Network Code
+1. Click **🔗 Invite** → note the **Network Code** badge (e.g., `NET-A3F7C1`).
+2. Share the 6-character code verbally or via any messaging app.
+3. Guests navigate to `http://<host_ip>:8080`, tap **Join Existing Network**, enter the code and their name.
+
+#### Method 3 — Direct URL
+1. Click **🔗 Invite** → Copy the **Direct Room URL** (displays the correct LAN IP, not a cloud domain).
+2. Send this link over WhatsApp, Telegram, etc. to anyone on the same Wi-Fi.
+3. Clicking the link opens the browser and auto-joins the network.
 
 ### 💡 Hostel & Campus Wi-Fi Tip (AP Isolation)
 
 > [!TIP]
 > **Can't reach the URL from your phone?**  
 > On university and hostel Wi-Fi networks (e.g., eduroam, hostel routers), **AP Isolation (Client Isolation)** is frequently enabled, blocking devices on the Wi-Fi from communicating directly with each other.  
-> **Easy Solution:** Turn on your phone's **Mobile Hotspot**, connect your computer to that hotspot, and use the updated IP displayed in the desktop app!
+> **Easy Solution:** Turn on your phone's **Mobile Hotspot**, connect your computer to that hotspot, and use the updated IP displayed in the invite modal.
 
 ---
 
@@ -247,7 +256,7 @@ CN_project/
 │   └── utils/                  # Helper utilities
 │       └── net_utils.py        # Local IP resolution & subnet broadcast calculation
 │
-└── tests/                      # Automated test suite (48 tests)
+└── tests/                      # Automated test suite (61 tests)
     ├── test_new_features.py    # Reactions, pinning, rooms, audio upload, and interfaces
     ├── test_e2e_full.py        # Comprehensive 7-condition End-to-End test suite
     ├── test_tcp.py             # TCP framing, send/receive & port-0 safety tests
@@ -263,7 +272,7 @@ CN_project/
 
 ## 🧪 Automated Testing & Verification
 
-The project includes a comprehensive automated test suite with **48 test conditions** covering unit, integration, and end-to-end scenarios.
+The project includes a comprehensive automated test suite with **61 test conditions** covering unit, integration, and end-to-end scenarios.
 
 Run all tests with a single command:
 ```bash
@@ -273,10 +282,12 @@ python -m unittest discover tests/
 ### Key Validated Test Conditions:
 - ✅ **Length-Prefixed Framing:** Correct encoding and stream reassembly across multi-byte character boundaries.
 - ✅ **Port Safety:** Proper rejection of invalid target ports (`0`, `-1`) to prevent OS socket errors.
-- ✅ **Windows Port Exclusivity:** `SO_EXCLUSIVEADDRUSE` enforcement and automatic port incrementing (`8080` $\rightarrow$ `8081`).
+- ✅ **Windows Port Exclusivity:** `SO_EXCLUSIVEADDRUSE` enforcement and automatic port incrementing (`8080` → `8081`).
 - ✅ **HTTP Protocol Compliance:** Handling of `GET`, `HEAD`, and CORS `OPTIONS` pre-flight headers.
-- ✅ **Mobile Lifecycle:** Complete mobile workflow from join $\rightarrow$ status touch $\rightarrow$ group message $\rightarrow$ private DM $\rightarrow$ polling.
+- ✅ **Mobile Lifecycle:** Complete mobile workflow from join → status touch → group message → private DM → polling.
 - ✅ **Binary Stream Integrity:** Chunked file transfers verified with bit-level SHA-256 cryptographic hashes.
+- ✅ **Network Isolation:** Only members of a network can read its messages — cross-network visibility blocked.
+- ✅ **QR / Invite URL:** Invite URL generation uses the correct LAN IP address, not a cloud domain.
 
 ---
 
