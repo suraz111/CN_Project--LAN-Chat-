@@ -47,6 +47,11 @@ class TestLandingPageAndOfflineGuide(unittest.TestCase):
         self.assertIn("Scan &amp; Chat at 300+ Mbps", content)
         self.assertIn("start_offline_chat.bat", content)
 
+        # Fullpage container & Quick Nickname input
+        self.assertIn("landing-fullpage", content)
+        self.assertIn('id="landing-input-nickname"', content)
+        self.assertIn("landing-tech-section", content)
+
         # Features grid
         self.assertIn("Ultra-Fast Direct LAN Transfer", content)
         self.assertIn("In-Browser Voice Notes", content)
@@ -61,6 +66,7 @@ class TestLandingPageAndOfflineGuide(unittest.TestCase):
         content = self.css_file.read_text(encoding="utf-8")
 
         self.assertIn(".btn-guide-nav", content)
+        self.assertIn(".landing-fullpage", content)
         self.assertIn(".landing-box", content)
         self.assertIn(".landing-hero-title", content)
         self.assertIn(".landing-actions-grid", content)
@@ -68,6 +74,7 @@ class TestLandingPageAndOfflineGuide(unittest.TestCase):
         self.assertIn(".landing-offline-section", content)
         self.assertIn(".offline-steps-grid", content)
         self.assertIn(".offline-step-card", content)
+        self.assertIn(".landing-tech-section", content)
         self.assertIn(".landing-features-grid", content)
         self.assertIn(".landing-remember-checkbox", content)
 
@@ -79,6 +86,10 @@ class TestLandingPageAndOfflineGuide(unittest.TestCase):
         self.assertIn("btnGuideToggle:", content)
         self.assertIn("landingModal:", content)
         self.assertIn("chkSkipLanding:", content)
+        self.assertIn("landingInputNickname:", content)
+
+        # Blinking prevention check in Welcome Hub
+        self.assertIn('dom.chatMessages.querySelector(".network-welcome-hub")', content)
 
         # Event listener wiring
         self.assertIn("dom.btnGuideToggle.addEventListener", content)

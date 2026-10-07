@@ -446,6 +446,7 @@ const dom = {
   btnGuideToggle: document.getElementById("btn-guide-toggle"),
   landingModal: document.getElementById("landing-modal"),
   chkSkipLanding: document.getElementById("chk-skip-landing"),
+  landingInputNickname: document.getElementById("landing-input-nickname"),
 };
 
 // ========================================================
@@ -476,19 +477,28 @@ window.addEventListener("DOMContentLoaded", () => {
   document.addEventListener("click", () => requestNotificationPermission(), { once: true });
 
   if (!state.username) {
-    dom.loginModal.classList.remove("hidden");
     if (state.pendingAutoJoin) {
+      dom.loginModal.classList.remove("hidden");
       const banner = document.getElementById("login-invite-banner");
       if (banner) {
         const roomTitle = state.pendingAutoJoin === "group" ? "🌐 Group Broadcast" : state.pendingAutoJoin;
         banner.innerHTML = `<span>🎯 Invited to room <strong>${escapeHtml(roomTitle)}</strong></span>`;
         banner.classList.remove("hidden");
       }
+      dom.inputUsername.focus();
+    } else {
+      // First visit / direct visit: ALWAYS show the full-page Landing Portal covering the entire page!
+      dom.loginModal.classList.add("hidden");
+      openLandingModal();
     }
-    dom.inputUsername.focus();
   } else {
     dom.loginModal.classList.add("hidden");
     initUserSession();
+    // Option 3 Hybrid Launch: Show full-page landing portal for direct visitors unless they opted to skip
+    const shouldSkipLanding = localStorage.getItem("lanchat_skip_landing") === "true";
+    if (!state.pendingAutoJoin && !shouldSkipLanding) {
+      openLandingModal();
+    }
   }
 
   // Initial fetch of host status and peers
@@ -499,12 +509,6 @@ window.addEventListener("DOMContentLoaded", () => {
 
   // Periodic polling for chat messages (every 800ms)
   setInterval(fetchMessages, 800);
-
-  // Option 3 Hybrid Launch: Show minimalist landing modal for direct visitors (not invited via link)
-  const shouldSkipLanding = localStorage.getItem("lanchat_skip_landing") === "true";
-  if (!state.pendingAutoJoin && !shouldSkipLanding) {
-    openLandingModal();
-  }
 });
 
 function toggleSidebar(forceState) {
@@ -573,6 +577,16 @@ function setupEventHandlers() {
     dom.btnRefresh.addEventListener("click", () => {
       fetchStatus();
       fetchMessages();
+    });
+  }
+
+  // Quick Enter key trigger for landing page nickname input
+  if (dom.landingInputNickname) {
+    dom.landingInputNickname.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        launchChatFromLanding();
+      }
     });
   }
 }
@@ -772,19 +786,25 @@ async function fetchStatus() {
     if (Array.isArray(data.rooms)) {
       // Merge unique confirmed rooms
       const merged = Array.from(new Set([...state.customRooms, ...data.rooms]));
+      const roomsChanged = JSON.stringify(merged) !== JSON.stringify(state.customRooms);
       state.customRooms = merged;
       saveMyRooms();
-      renderCustomRooms();
+      if (roomsChanged) {
+        renderCustomRooms();
+      }
     }
 
     if (Array.isArray(data.peers)) {
-      state.peers = data.peers;
-      renderPeersList(data.peers);
-      renderP2PHubList();
+      const peersChanged = JSON.stringify(data.peers) !== JSON.stringify(state.peers);
+      if (peersChanged) {
+        state.peers = data.peers;
+        renderPeersList(data.peers);
+        renderP2PHubList();
 
-      const count = data.peers.length;
-      dom.onlineCount.textContent = `${count} Peer${count === 1 ? "" : "s"}`;
-      dom.peersCountLabel.textContent = count;
+        const count = data.peers.length;
+        dom.onlineCount.textContent = `${count} Peer${count === 1 ? "" : "s"}`;
+        dom.peersCountLabel.textContent = count;
+      }
     }
 
     if (data.unreads) {
@@ -887,6 +907,8 @@ function renderPeersList(peers) {
 // ========================================================
 function renderWelcomeHub() {
   if (!dom.chatMessages) return;
+  // Guard against re-rendering every 800ms poll to eliminate page blinking
+  if (dom.chatMessages.querySelector(".network-welcome-hub")) return;
   dom.chatMessages.innerHTML = `
     <div class="network-welcome-hub">
       <div class="welcome-hub-card glass-card">
@@ -1951,7 +1973,20 @@ function openLandingModal() {
   if (dom.chkSkipLanding) {
     dom.chkSkipLanding.checked = localStorage.getItem("lanchat_skip_landing") === "true";
   }
+  if (dom.landingInputNickname) {
+    dom.landingInputNickname.value = state.username || "";
+  }
+  if (dom.loginModal) {
+    dom.loginModal.classList.add("hidden");
+  }
   dom.landingModal.classList.remove("hidden");
+  if (dom.landingInputNickname && !state.username) {
+    setTimeout(() => {
+      try {
+        dom.landingInputNickname.focus();
+      } catch (e) {}
+    }, 150);
+  }
 }
 
 function closeLandingModal(savePreference = false) {
@@ -1968,6 +2003,11 @@ function closeLandingModal(savePreference = false) {
 }
 
 function launchChatFromLanding() {
+  const enteredName = dom.landingInputNickname ? dom.landingInputNickname.value.trim() : "";
+  if (enteredName) {
+    saveUsername(enteredName);
+    initUserSession();
+  }
   closeLandingModal(true);
   if (!state.username) {
     if (dom.loginModal) dom.loginModal.classList.remove("hidden");
@@ -1978,6 +2018,11 @@ function launchChatFromLanding() {
 }
 
 function startPrivateNetworkFlow() {
+  const enteredName = dom.landingInputNickname ? dom.landingInputNickname.value.trim() : "";
+  if (enteredName) {
+    saveUsername(enteredName);
+    initUserSession();
+  }
   closeLandingModal(true);
   if (!state.username) {
     if (dom.loginModal) dom.loginModal.classList.remove("hidden");
@@ -2492,8 +2537,11 @@ function sendDeviceNotification(title, body, channelId) {
 }
 
 function handleUnreadBadges(unreads) {
-  state.unreadCounts = unreads || {};
-  const groupCount = unreads.group || 0;
+  const currentUnreads = unreads || {};
+  const unreadsChanged = JSON.stringify(currentUnreads) !== JSON.stringify(state.unreadCounts);
+  if (!unreadsChanged) return;
+  state.unreadCounts = currentUnreads;
+  const groupCount = currentUnreads.group || 0;
   if (dom.badgeGroup) {
     dom.badgeGroup.textContent = groupCount;
     dom.badgeGroup.classList.toggle("hidden", groupCount === 0);

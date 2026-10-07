@@ -589,138 +589,235 @@
     </div>
   </div>
 
-  <!-- Minimalist Platform Landing Page & Offline Guide Modal -->
-  <div id="landing-modal" class="modal-overlay hidden">
-    <div class="glass-card modal-box-wide landing-box">
-      <div class="modal-header landing-header">
-        <div class="modal-title-group">
-          <div class="landing-brand-badge">
-            <span class="pulse-icon">📡</span>
-            <span class="landing-brand-name">Simple LAN Chat</span>
-            <span class="network-mode-pill">📶 100% Offline Capable</span>
-          </div>
+  <!-- Full-Page Platform Landing Portal & Offline Guide -->
+  <div id="landing-modal" class="landing-fullpage hidden">
+    <div class="landing-box">
+      <header class="landing-header">
+        <div class="landing-brand-badge">
+          <span class="pulse-icon">📡</span>
+          <span class="landing-brand-name">Simple LAN Chat</span>
+          <span class="network-mode-pill">📶 100% Offline Capable</span>
+          <span class="network-mode-pill pill-subtle">⚡ Zero Cloud Required</span>
         </div>
-        <button class="modal-close-btn" onclick="closeLandingModal(true)" aria-label="Close Landing Page">✕</button>
-      </div>
+        <div class="landing-header-actions">
+          <button type="button" class="btn-primary btn-header-enter" onclick="launchChatFromLanding()">Enter Chat ➔</button>
+          <button class="modal-close-btn" onclick="closeLandingModal(true)" aria-label="Close Landing Page">✕</button>
+        </div>
+      </header>
 
       <div class="landing-scroll-body">
-        <!-- Hero Section -->
-        <section class="landing-hero-section">
-          <h2 class="landing-hero-title">Private Local Communication.<br><span class="gradient-text">Zero Internet Required.</span></h2>
-          <p class="landing-hero-subtitle">
-            Instantly chat, share 100MB+ files, send voice notes, and create end-to-end encrypted rooms across phones, laptops, and PCs over your local Wi-Fi or phone hotspot. No cloud servers, no account logins, no data tracking.
-          </p>
+        <div class="landing-content-wrap">
+          <!-- Hero Section -->
+          <section class="landing-hero-section">
+            <div class="landing-hero-badge">
+              <span>🚀 DECENTRALIZED HYBRID P2P PLATFORM</span>
+            </div>
+            <h1 class="landing-hero-title">Private Local Communication.<br><span class="gradient-text">Zero Internet Required.</span></h1>
+            <p class="landing-hero-subtitle">
+              Instantly chat, stream 100MB+ files, record voice notes, and host encrypted private rooms across smartphones, laptops, and PCs over your local Wi-Fi, phone hotspot, or mobile cellular data. No cloud accounts, no tracking, zero external dependencies.
+            </p>
 
-          <!-- 3 Quick Action Cards -->
-          <div class="landing-actions-grid">
-            <!-- Action 1: Enter Live Chat -->
-            <div class="landing-action-card card-primary" onclick="launchChatFromLanding()">
-              <div class="card-icon">💬</div>
-              <div class="card-info">
-                <h4>Enter Live Chat</h4>
-                <p>Join broadcast or topic channels immediately with your local peers.</p>
+            <!-- Quick Nickname & Direct Action Entry -->
+            <div class="landing-quick-join">
+              <div class="landing-nickname-box">
+                <span class="landing-input-icon">👤</span>
+                <input type="text" id="landing-input-nickname" class="landing-nickname-input" placeholder="Choose your display name (e.g. Alex)..." maxlength="24" autocomplete="off" />
               </div>
-              <button type="button" class="btn-card-action">Launch Chat ➔</button>
-            </div>
-
-            <!-- Action 2: Start Private Network / Room -->
-            <div class="landing-action-card card-accent" onclick="startPrivateNetworkFlow()">
-              <div class="card-icon">🔒</div>
-              <div class="card-info">
-                <h4>Start Private Network</h4>
-                <p>Create a custom room with password &amp; 1-click invite link with dynamic QR code.</p>
+              <div class="landing-hero-btn-row">
+                <button type="button" class="btn-primary landing-btn-cta" onclick="launchChatFromLanding()">
+                  💬 Enter LAN Chat ➔
+                </button>
+                <button type="button" class="btn-secondary landing-btn-cta-sec" onclick="startPrivateNetworkFlow()">
+                  🔒 Start Private Room
+                </button>
               </div>
-              <button type="button" class="btn-card-action">Create Room ➔</button>
             </div>
 
-            <!-- Action 3: Offline Mode Guide -->
-            <div class="landing-action-card card-highlight" onclick="scrollToOfflineGuide()">
-              <div class="card-icon">📶</div>
-              <div class="card-info">
-                <h4>Offline Mode Guide</h4>
-                <p>How to run with 0 bytes of internet using phone hotspot or local Wi-Fi.</p>
+            <!-- 3 Quick Action Cards -->
+            <div class="landing-actions-grid">
+              <!-- Action 1: Enter Live Chat -->
+              <div class="landing-action-card card-primary" onclick="launchChatFromLanding()">
+                <div class="card-icon">💬</div>
+                <div class="card-info">
+                  <h4>Enter Live Chat</h4>
+                  <p>Join broadcast or topic channels immediately with your local peers.</p>
+                </div>
+                <button type="button" class="btn-card-action">Launch Chat ➔</button>
               </div>
-              <button type="button" class="btn-card-action">View Steps ↓</button>
-            </div>
-          </div>
-        </section>
 
-        <!-- Offline Setup Solution A: Mobile Hotspot Method -->
-        <section id="landing-offline-section" class="landing-offline-section">
-          <div class="section-title-tag">
-            <span>⚡ SOLUTION A • 100% ZERO-INTERNET SETUP</span>
-          </div>
-          <h3 class="offline-heading">How to Run When There is No Internet Connection</h3>
-          <p class="offline-sub">Any smartphone or laptop can act as a local network hub without consuming a single byte of cellular data or internet.</p>
+              <!-- Action 2: Start Private Network / Room -->
+              <div class="landing-action-card card-accent" onclick="startPrivateNetworkFlow()">
+                <div class="card-icon">🔒</div>
+                <div class="card-info">
+                  <h4>Start Private Network</h4>
+                  <p>Create a custom room with passkey, 1-click invite link &amp; dynamic QR code.</p>
+                </div>
+                <button type="button" class="btn-card-action">Create Room ➔</button>
+              </div>
 
-          <div class="offline-steps-grid">
-            <div class="offline-step-card">
-              <div class="step-num-badge">1</div>
-              <div class="step-icon">📱</div>
-              <h4>Turn On Hotspot</h4>
-              <p>Turn on <strong>Personal / Wi-Fi Hotspot</strong> on any phone. (Mobile data &amp; internet can be turned <strong>OFF</strong> or phone can be in Airplane mode!).</p>
+              <!-- Action 3: Offline Mode Guide -->
+              <div class="landing-action-card card-highlight" onclick="scrollToOfflineGuide()">
+                <div class="card-icon">📶</div>
+                <div class="card-info">
+                  <h4>Offline Mode Guide</h4>
+                  <p>How to run with 0 bytes of internet using phone hotspot or local Wi-Fi.</p>
+                </div>
+                <button type="button" class="btn-card-action">View Steps ↓</button>
+              </div>
             </div>
+          </section>
 
-            <div class="offline-step-card">
-              <div class="step-num-badge">2</div>
-              <div class="step-icon">💻</div>
-              <h4>Connect Devices</h4>
-              <p>Connect your laptop, PC, and other phones to that phone's Wi-Fi network. This creates a secure, local 802.11 LAN.</p>
+          <!-- Offline Setup Solution A: Mobile Hotspot Method -->
+          <section id="landing-offline-section" class="landing-offline-section">
+            <div class="section-title-tag">
+              <span>⚡ SOLUTION A • 100% ZERO-INTERNET SETUP</span>
             </div>
+            <h2 class="offline-heading">How to Run When There is No Internet Connection</h2>
+            <p class="offline-sub">Any smartphone or laptop can act as a local network hub without consuming a single byte of cellular data or internet.</p>
 
-            <div class="offline-step-card">
-              <div class="step-num-badge">3</div>
-              <div class="step-icon">🚀</div>
-              <h4>Start Local Host</h4>
-              <p>On your computer, run <code>start_offline_chat.bat</code> (or <code>python web_main.py</code>). It auto-binds to your hotspot IP.</p>
-            </div>
+            <div class="offline-steps-grid">
+              <div class="offline-step-card">
+                <div class="step-num-badge">1</div>
+                <div class="step-icon">📱</div>
+                <h4>Turn On Hotspot</h4>
+                <p>Turn on <strong>Personal / Wi-Fi Hotspot</strong> on any phone. (Mobile data &amp; internet can be turned <strong>OFF</strong> or phone can be in Airplane mode!).</p>
+              </div>
 
-            <div class="offline-step-card">
-              <div class="step-num-badge">4</div>
-              <div class="step-icon">✨</div>
-              <h4>Scan &amp; Chat at 300+ Mbps</h4>
-              <p>Connected phones open the displayed IP (e.g. <code>http://192.168.43.1:8080</code>) or scan the QR code. All assets are 100% local!</p>
-            </div>
-          </div>
-        </section>
+              <div class="offline-step-card">
+                <div class="step-num-badge">2</div>
+                <div class="step-icon">💻</div>
+                <h4>Connect Devices</h4>
+                <p>Connect your laptop, PC, and other phones to that phone's Wi-Fi network. This creates a secure, local 802.11 LAN.</p>
+              </div>
 
-        <!-- Features Grid -->
-        <section class="landing-features-section">
-          <h3 class="features-heading">Built for Speed, Privacy &amp; Simplicity</h3>
-          <div class="landing-features-grid">
-            <div class="feature-card">
-              <span class="f-icon">⚡</span>
-              <h4>Ultra-Fast Direct LAN Transfer</h4>
-              <p>Send large files, raw photos, and videos directly across the local network at full Wi-Fi speeds without cloud throttling.</p>
+              <div class="offline-step-card">
+                <div class="step-num-badge">3</div>
+                <div class="step-icon">🚀</div>
+                <h4>Start Local Host</h4>
+                <p>On your computer, run <code>start_offline_chat.bat</code> (or <code>python web_main.py</code>). It auto-binds to your hotspot IP.</p>
+              </div>
+
+              <div class="offline-step-card">
+                <div class="step-num-badge">4</div>
+                <div class="step-icon">✨</div>
+                <h4>Scan &amp; Chat at 300+ Mbps</h4>
+                <p>Connected phones open the displayed IP (e.g. <code>http://192.168.43.1:8080</code>) or scan the QR code. All assets are 100% local!</p>
+              </div>
             </div>
-            <div class="feature-card">
-              <span class="f-icon">🎙️</span>
-              <h4>In-Browser Voice Notes</h4>
-              <p>Record high-fidelity audio messages using Web Audio API with visual audio player controls.</p>
+          </section>
+
+          <!-- System Architecture & Technical Specifications Section -->
+          <section class="landing-tech-section">
+            <div class="section-title-tag tag-blue">
+              <span>🏗️ ARCHITECTURE &amp; PROTOCOL SPECIFICATION</span>
             </div>
-            <div class="feature-card">
-              <span class="f-icon">🔐</span>
-              <h4>End-to-End Encryption</h4>
-              <p>Set a custom secret passphrase for topic rooms so messages are encrypted before transmission.</p>
+            <h2 class="tech-heading">Built with Layered OSI Network Protocols</h2>
+            <p class="tech-sub">Engineered strictly with Python standard library sockets, framing headers, and asynchronous event loops.</p>
+
+            <div class="tech-grid">
+              <div class="tech-card">
+                <div class="tech-card-header">
+                  <span class="tech-badge udp-badge">UDP • Port 50000</span>
+                  <span class="tech-layer">Layer 4 Transport</span>
+                </div>
+                <h4>Decentralized Peer Discovery</h4>
+                <p>Broadcasts periodic beacon heartbeats across the subnet mask. Discovers active nodes dynamically without central directories.</p>
+              </div>
+
+              <div class="tech-card">
+                <div class="tech-card-header">
+                  <span class="tech-badge tcp-badge">TCP • Port 50001</span>
+                  <span class="tech-layer">Layer 4 Transport</span>
+                </div>
+                <h4>Framed Direct Socket Streaming</h4>
+                <p>4-byte big-endian length prefix framing prevents TCP concatenation. Transfers 100MB+ binary streams with SHA-256 integrity validation.</p>
+              </div>
+
+              <div class="tech-card">
+                <div class="tech-card-header">
+                  <span class="tech-badge http-badge">HTTP • Port 8080</span>
+                  <span class="tech-layer">Layer 7 Application</span>
+                </div>
+                <h4>Mobile Web Client &amp; REST Gateway</h4>
+                <p>Zero-dependency HTTP daemon serving the responsive Vanilla JS SPA, in-memory polling buffers, and real-time event endpoints.</p>
+              </div>
+
+              <div class="tech-card">
+                <div class="tech-card-header">
+                  <span class="tech-badge zero-badge">Zero Config</span>
+                  <span class="tech-layer">Standard Library</span>
+                </div>
+                <h4>No Cloud &amp; No 3rd-Party Libs</h4>
+                <p>Runs out of the box on standard Python 3.10+. No pip installations, no external database, no telemetry, complete data sovereignty.</p>
+              </div>
             </div>
-            <div class="feature-card">
-              <span class="f-icon">📲</span>
-              <h4>Zero Mobile App Store Installs</h4>
-              <p>Works smoothly in Chrome, Safari, Firefox, and Edge on Android, iOS, Windows, Mac, and Linux.</p>
+          </section>
+
+          <!-- Features Grid -->
+          <section class="landing-features-section">
+            <h2 class="features-heading">High-Performance Local Capabilities</h2>
+            <div class="landing-features-grid">
+              <div class="feature-card">
+                <span class="f-icon">⚡</span>
+                <div class="f-text">
+                  <h4>Ultra-Fast Direct LAN Transfer</h4>
+                  <p>Send large files, raw photos, and videos directly across the local network at full Wi-Fi speeds (up to 300+ Mbps) without cloud throttling.</p>
+                </div>
+              </div>
+              <div class="feature-card">
+                <span class="f-icon">🎙️</span>
+                <div class="f-text">
+                  <h4>In-Browser Voice Notes</h4>
+                  <p>Record high-fidelity audio messages using Web Audio API and MediaRecorder with visual waveform player controls.</p>
+                </div>
+              </div>
+              <div class="feature-card">
+                <span class="f-icon">🔐</span>
+                <div class="f-text">
+                  <h4>End-to-End Room Encryption</h4>
+                  <p>Set a custom secret passkey for private topic rooms so messages are encrypted before transmission across the wire.</p>
+                </div>
+              </div>
+              <div class="feature-card">
+                <span class="f-icon">📲</span>
+                <div class="f-text">
+                  <h4>Zero Mobile App Store Installs</h4>
+                  <p>Works smoothly in Chrome, Safari, Firefox, and Edge on Android, iOS, Windows, macOS, and Linux.</p>
+                </div>
+              </div>
+              <div class="feature-card">
+                <span class="f-icon">📌</span>
+                <div class="f-text">
+                  <h4>Sticky Pins &amp; Live Search</h4>
+                  <p>Pin critical announcements to the top of any channel and filter conversations with real-time text matching.</p>
+                </div>
+              </div>
+              <div class="feature-card">
+                <span class="f-icon">🌐</span>
+                <div class="f-text">
+                  <h4>Mobile Cellular &amp; Cloud Ready</h4>
+                  <p>Works on pure offline Wi-Fi hotspots as well as cloud-hosted deployments (Render) across different cellular carrier networks.</p>
+                </div>
+              </div>
             </div>
-          </div>
-        </section>
+          </section>
+        </div>
       </div>
 
-      <div class="modal-footer landing-footer">
+      <footer class="landing-footer">
         <label class="landing-remember-checkbox">
           <input type="checkbox" id="chk-skip-landing">
-          <span>Remember and jump directly to chat on future visits</span>
+          <span>Remember choice and jump directly to chat on future visits</span>
         </label>
-        <button type="button" class="btn-primary btn-enter-chat" onclick="launchChatFromLanding()">
-          Enter LAN Chat ➔
-        </button>
-      </div>
+        <div class="landing-footer-actions">
+          <button type="button" class="btn-secondary btn-footer-guide" onclick="scrollToOfflineGuide()">
+            📶 Offline Setup Guide
+          </button>
+          <button type="button" class="btn-primary btn-enter-chat" onclick="launchChatFromLanding()">
+            Enter LAN Chat ➔
+          </button>
+        </div>
+      </footer>
     </div>
   </div>
 
