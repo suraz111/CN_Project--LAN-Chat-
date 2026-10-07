@@ -247,67 +247,103 @@ class WebGatewayHandler(http.server.BaseHTTPRequestHandler):
             ctx = self.server.app_context
             client_id = query.get("client_id", [None])[0]
             client_name = query.get("username", ["Mobile User"])[0]
+            raw_net = query.get("network_id", [None])[0] or query.get("net", [None])[0]
+            network_id = raw_net.strip().upper() if raw_net else (self.server.client_network.get(client_id) if client_id else None)
             client_ip = self._get_client_ip()
 
             if client_id:
-                self.server.touch_client(client_id, client_name, client_ip)
+                self.server.touch_client(client_id, client_name, client_ip, network_id)
 
             peers_list = []
 
-            # 1. The Host Desktop User (always first so mobile clients can DM the host)
-            peers_list.append(
-                {
-                    "peer_id": ctx.peer_id,
-                    "username": f"{ctx.username} (Host)",
-                    "device_name": getattr(ctx, "device_name", "Host PC"),
-                    "ip_address": ctx.local_ip,
-                    "tcp_port": getattr(ctx, "actual_tcp_port", config.DEFAULT_TCP_PORT),
-                    "status": "Online",
-                    "is_host": True,
-                    "is_web": False,
-                }
-            )
+            if network_id:
+                net = self.server.get_or_create_network(network_id, creator_id=client_id, creator_name=client_name)
+                # Strict Multi-Tenant Network Isolation: ONLY peers in THIS exact private network!
+                with self.server.clients_lock:
+                    for cid, cinfo in self.server.web_clients.items():
+                        if cid != client_id and cinfo.get("network_id") == network_id:
+                            peers_list.append(
+                                {
+                                    "peer_id": cid,
+                                    "username": cinfo["username"],
+                                    "device_name": "Mobile / Web",
+                                    "ip_address": cinfo["ip_address"],
+                                    "tcp_port": 0,
+                                    "status": "Online",
+                                    "is_host": False,
+                                    "is_web": True,
+                                    "network_id": network_id,
+                                }
+                            )
 
-            # 2. Other Web / Mobile Clients connected to this gateway
-            with self.server.clients_lock:
-                for cid, cinfo in self.server.web_clients.items():
-                    if cid != client_id:
-                        peers_list.append(
-                            {
-                                "peer_id": cid,
-                                "username": cinfo["username"],
-                                "device_name": "Mobile / Web",
-                                "ip_address": cinfo["ip_address"],
-                                "tcp_port": 0,
-                                "status": "Online",
-                                "is_host": False,
-                                "is_web": True,
-                            }
-                        )
-
-            # 3. Regular LAN TCP peers discovered via UDP
-            if hasattr(ctx, "discovery_engine") and hasattr(ctx.discovery_engine, "_peers_lock"):
-                with ctx.discovery_engine._peers_lock:
-                    peers_snapshot = list(ctx.peers.values())
+                # Include host PC only if host PC is specifically part of this network
+                if self.server.client_network.get(ctx.peer_id) == network_id:
+                    peers_list.insert(
+                        0,
+                        {
+                            "peer_id": ctx.peer_id,
+                            "username": f"{ctx.username} (Host)",
+                            "device_name": getattr(ctx, "device_name", "Host PC"),
+                            "ip_address": ctx.local_ip,
+                            "tcp_port": getattr(ctx, "actual_tcp_port", config.DEFAULT_TCP_PORT),
+                            "status": "Online",
+                            "is_host": True,
+                            "is_web": False,
+                            "network_id": network_id,
+                        },
+                    )
             else:
-                peers_snapshot = list(ctx.peers.values())
-
-            for p in peers_snapshot:
-                # Do not re-add web peers or the host
-                if getattr(p, "is_web", False) or p.peer_id == ctx.peer_id:
-                    continue
+                # Legacy / Default fallback (for backward compatibility and test suite)
                 peers_list.append(
                     {
-                        "peer_id": p.peer_id,
-                        "username": p.username,
-                        "device_name": p.device_name,
-                        "ip_address": p.ip_address,
-                        "tcp_port": p.tcp_port,
-                        "status": p.status,
-                        "is_host": False,
+                        "peer_id": ctx.peer_id,
+                        "username": f"{ctx.username} (Host)",
+                        "device_name": getattr(ctx, "device_name", "Host PC"),
+                        "ip_address": ctx.local_ip,
+                        "tcp_port": getattr(ctx, "actual_tcp_port", config.DEFAULT_TCP_PORT),
+                        "status": "Online",
+                        "is_host": True,
                         "is_web": False,
                     }
                 )
+
+                with self.server.clients_lock:
+                    for cid, cinfo in self.server.web_clients.items():
+                        if cid != client_id and not cinfo.get("network_id"):
+                            peers_list.append(
+                                {
+                                    "peer_id": cid,
+                                    "username": cinfo["username"],
+                                    "device_name": "Mobile / Web",
+                                    "ip_address": cinfo["ip_address"],
+                                    "tcp_port": 0,
+                                    "status": "Online",
+                                    "is_host": False,
+                                    "is_web": True,
+                                }
+                            )
+
+                if hasattr(ctx, "discovery_engine") and hasattr(ctx.discovery_engine, "_peers_lock"):
+                    with ctx.discovery_engine._peers_lock:
+                        peers_snapshot = list(ctx.peers.values())
+                else:
+                    peers_snapshot = list(ctx.peers.values())
+
+                for p in peers_snapshot:
+                    if getattr(p, "is_web", False) or p.peer_id == ctx.peer_id:
+                        continue
+                    peers_list.append(
+                        {
+                            "peer_id": p.peer_id,
+                            "username": p.username,
+                            "device_name": p.device_name,
+                            "ip_address": p.ip_address,
+                            "tcp_port": p.tcp_port,
+                            "status": p.status,
+                            "is_host": False,
+                            "is_web": False,
+                        }
+                    )
 
             # Calculate unread counts and pending notification events for this client
             unreads = {}
@@ -318,9 +354,15 @@ class WebGatewayHandler(http.server.BaseHTTPRequestHandler):
                 last_notified = self.server.client_last_notified.get(client_id, connect_time)
                 notif_cutoff = max(connect_time, last_notified)
 
+                histories_source = (
+                    self.server.networks[network_id]["chat_histories"]
+                    if network_id and network_id in self.server.networks
+                    else ctx.chat_histories
+                )
+
                 # 1. Group Broadcast messages (exclude system messages)
                 group_last_read = read_times.get(None, 0.0)
-                group_msgs = ctx.chat_histories.get(None, [])
+                group_msgs = histories_source.get(None, [])
                 new_group = [
                     m for m in group_msgs
                     if m.get("timestamp_epoch", 0) > group_last_read
@@ -342,84 +384,62 @@ class WebGatewayHandler(http.server.BaseHTTPRequestHandler):
                     })
 
                 # 2. Private DMs from Desktop Host
-                host_last_read = read_times.get(ctx.peer_id, 0.0)
-                host_msgs = ctx.chat_histories.get(client_id, [])
-                new_host = [
-                    m for m in host_msgs
-                    if m.get("timestamp_epoch", 0) > host_last_read
-                    and m.get("sender_id") != client_id
-                    and m.get("category") != "system"
-                ]
-                unreads[ctx.peer_id] = len(new_host)
-                notify_host = [m for m in new_host if m.get("timestamp_epoch", 0) > notif_cutoff]
-                for m in notify_host[-5:]:
-                    notifications.append({
-                        "id": m.get("id") or f"{m.get('timestamp_epoch')}_{m.get('sender')}",
-                        "channel": ctx.peer_id,
-                        "sender": f"{ctx.username} (Host)",
-                        "message": m.get("message", ""),
-                        "timestamp": m.get("timestamp", ""),
-                        "timestamp_epoch": m.get("timestamp_epoch", 0),
-                        "category": m.get("category", "chat"),
-                        "is_dm": True,
-                    })
-
-                # 3. Private DMs from other Web Clients
-                for cid in list(self.server.web_clients.keys()):
-                    if cid != client_id:
-                        dm_k = f"dm_{min(client_id, cid)}_{max(client_id, cid)}"
-                        cid_last_read = read_times.get(cid, 0.0)
-                        cid_msgs = ctx.chat_histories.get(dm_k, [])
-                        new_cid = [
-                            m for m in cid_msgs
-                            if m.get("timestamp_epoch", 0) > cid_last_read
-                            and m.get("sender_id") != client_id
-                            and m.get("category") != "system"
-                        ]
-                        unreads[cid] = len(new_cid)
-                        other_info = self.server.web_clients.get(cid, {})
-                        other_name = other_info.get("username", "Peer")
-                        notify_cid = [m for m in new_cid if m.get("timestamp_epoch", 0) > notif_cutoff]
-                        for m in notify_cid[-5:]:
-                            notifications.append({
-                                "id": m.get("id") or f"{m.get('timestamp_epoch')}_{m.get('sender')}",
-                                "channel": cid,
-                                "sender": f"{other_name} 📱",
-                                "message": m.get("message", ""),
-                                "timestamp": m.get("timestamp", ""),
-                                "timestamp_epoch": m.get("timestamp_epoch", 0),
-                                "category": m.get("category", "chat"),
-                                "is_dm": True,
-                            })
-
-                # 4. Private DMs from remote LAN TCP desktop peers
-                for pid, p in ctx.peers.items():
-                    if getattr(p, "is_web", False) or pid == ctx.peer_id:
-                        continue
-                    p_last_read = read_times.get(pid, 0.0)
-                    p_msgs = ctx.chat_histories.get(pid, [])
-                    new_p = [
-                        m for m in p_msgs
-                        if m.get("timestamp_epoch", 0) > p_last_read
+                if not network_id or self.server.client_network.get(ctx.peer_id) == network_id:
+                    host_last_read = read_times.get(ctx.peer_id, 0.0)
+                    host_msgs = histories_source.get(client_id, [])
+                    new_host = [
+                        m for m in host_msgs
+                        if m.get("timestamp_epoch", 0) > host_last_read
                         and m.get("sender_id") != client_id
                         and m.get("category") != "system"
                     ]
-                    if new_p:
-                        unreads[pid] = len(new_p)
-                        notify_p = [m for m in new_p if m.get("timestamp_epoch", 0) > notif_cutoff]
-                        for m in notify_p[-5:]:
-                            notifications.append({
-                                "id": m.get("id") or f"{m.get('timestamp_epoch')}_{m.get('sender')}",
-                                "channel": pid,
-                                "sender": p.username,
-                                "message": m.get("message", ""),
-                                "timestamp": m.get("timestamp", ""),
-                                "timestamp_epoch": m.get("timestamp_epoch", 0),
-                                "category": m.get("category", "chat"),
-                                "is_dm": True,
-                            })
+                    unreads[ctx.peer_id] = len(new_host)
+                    notify_host = [m for m in new_host if m.get("timestamp_epoch", 0) > notif_cutoff]
+                    for m in notify_host[-5:]:
+                        notifications.append({
+                            "id": m.get("id") or f"{m.get('timestamp_epoch')}_{m.get('sender')}",
+                            "channel": ctx.peer_id,
+                            "sender": f"{ctx.username} (Host)",
+                            "message": m.get("message", ""),
+                            "timestamp": m.get("timestamp", ""),
+                            "timestamp_epoch": m.get("timestamp_epoch", 0),
+                            "category": m.get("category", "chat"),
+                            "is_dm": True,
+                        })
 
-                # 5. Topic Channel Rooms: Only notify and count unreads for rooms THIS client has joined!
+                # 3. Private DMs from other Web Clients in this same network
+                with self.server.clients_lock:
+                    active_peers_for_dm = [
+                        cid for cid, cinfo in self.server.web_clients.items()
+                        if cid != client_id and (not network_id or cinfo.get("network_id") == network_id)
+                    ]
+                for cid in active_peers_for_dm:
+                    dm_k = f"dm_{min(client_id, cid)}_{max(client_id, cid)}"
+                    cid_last_read = read_times.get(cid, 0.0)
+                    cid_msgs = histories_source.get(dm_k, [])
+                    new_cid = [
+                        m for m in cid_msgs
+                        if m.get("timestamp_epoch", 0) > cid_last_read
+                        and m.get("sender_id") != client_id
+                        and m.get("category") != "system"
+                    ]
+                    unreads[cid] = len(new_cid)
+                    other_info = self.server.web_clients.get(cid, {})
+                    other_name = other_info.get("username", "Peer")
+                    notify_cid = [m for m in new_cid if m.get("timestamp_epoch", 0) > notif_cutoff]
+                    for m in notify_cid[-5:]:
+                        notifications.append({
+                            "id": m.get("id") or f"{m.get('timestamp_epoch')}_{m.get('sender')}",
+                            "channel": cid,
+                            "sender": f"{other_name} 📱",
+                            "message": m.get("message", ""),
+                            "timestamp": m.get("timestamp", ""),
+                            "timestamp_epoch": m.get("timestamp_epoch", 0),
+                            "category": m.get("category", "chat"),
+                            "is_dm": True,
+                        })
+
+                # 4. Topic Channel Rooms: sync and unreads
                 client_joined_rooms = set(self.server.client_rooms.get(client_id, set())) if client_id else set()
                 sync_rooms_param = query.get("rooms", [None])[0]
                 if sync_rooms_param and client_id:
@@ -431,9 +451,15 @@ class WebGatewayHandler(http.server.BaseHTTPRequestHandler):
                             client_joined_rooms.add(rm)
                     self.server.client_rooms[client_id] = client_joined_rooms
 
-                for r_name in client_joined_rooms:
+                target_rooms = (
+                    client_joined_rooms.union(self.server.networks[network_id]["rooms"])
+                    if network_id and network_id in self.server.networks
+                    else client_joined_rooms
+                )
+
+                for r_name in target_rooms:
                     r_last_read = read_times.get(r_name, 0.0)
-                    r_msgs = ctx.chat_histories.get(r_name, [])
+                    r_msgs = histories_source.get(r_name, [])
                     new_r = [
                         m for m in r_msgs
                         if m.get("timestamp_epoch", 0) > r_last_read
@@ -454,7 +480,6 @@ class WebGatewayHandler(http.server.BaseHTTPRequestHandler):
                             "is_dm": False,
                         })
 
-                # Advance client_last_notified so these notifications are delivered only once
                 if notifications:
                     max_notif_ts = max(n.get("timestamp_epoch", time.time()) for n in notifications)
                     self.server.client_last_notified[client_id] = max_notif_ts
@@ -463,14 +488,21 @@ class WebGatewayHandler(http.server.BaseHTTPRequestHandler):
             if not active_ip.startswith("127."):
                 ctx.local_ip = active_ip
 
-            # Client only receives the rooms they have joined or created (empty for new users)
-            out_rooms = sorted(list(client_joined_rooms)) if client_id else sorted(list(getattr(ctx, "custom_rooms", set())))
+            # Client only receives the rooms of their own network or their joined rooms
+            if network_id and network_id in self.server.networks:
+                out_rooms = sorted(list(self.server.networks[network_id]["rooms"]))
+                net_name = self.server.networks[network_id]["network_name"]
+            else:
+                out_rooms = sorted(list(client_joined_rooms)) if client_id else sorted(list(getattr(ctx, "custom_rooms", set())))
+                net_name = None
 
             self._send_json(
                 {
                     "online": True,
                     "app_name": config.APP_NAME,
                     "version": config.APP_VERSION,
+                    "network_id": network_id,
+                    "network_name": net_name,
                     "host_user": ctx.username,
                     "username": ctx.username,
                     "host_ip": ctx.local_ip,
@@ -496,6 +528,8 @@ class WebGatewayHandler(http.server.BaseHTTPRequestHandler):
             raw_channel = query.get("channel", [None])[0]
             channel_id = None if raw_channel in (None, "", "null", "group") else raw_channel
             client_id = query.get("client_id", [None])[0]
+            raw_net = query.get("network_id", [None])[0] or query.get("net", [None])[0]
+            network_id = raw_net.strip().upper() if raw_net else (self.server.client_network.get(client_id) if client_id else None)
 
             since_str = query.get("since", ["0"])[0]
             try:
@@ -506,7 +540,7 @@ class WebGatewayHandler(http.server.BaseHTTPRequestHandler):
             # Keep client activity alive and mark channel as read
             if client_id:
                 client_name = query.get("username", ["Mobile User"])[0]
-                self.server.touch_client(client_id, client_name, self._get_client_ip())
+                self.server.touch_client(client_id, client_name, self._get_client_ip(), network_id)
                 self.server.mark_read(client_id, channel_id)
 
             # Resolve history storage key:
@@ -521,7 +555,13 @@ class WebGatewayHandler(http.server.BaseHTTPRequestHandler):
             else:
                 history_key = channel_id
 
-            history = ctx.chat_histories.get(history_key, [])
+            if network_id and network_id in self.server.networks:
+                net = self.server.networks[network_id]
+                history = net["chat_histories"].get(history_key, [])
+                pinned_msg = net["pinned_messages"].get(channel_id)
+            else:
+                history = ctx.chat_histories.get(history_key, [])
+                pinned_msg = getattr(ctx, "pinned_messages", {}).get(channel_id)
 
             if since <= 0:
                 raw_messages = list(history)
@@ -553,10 +593,9 @@ class WebGatewayHandler(http.server.BaseHTTPRequestHandler):
                 m_copy.setdefault("pinned", False)
                 formatted_messages.append(m_copy)
 
-            pinned_msg = getattr(ctx, "pinned_messages", {}).get(channel_id)
-
             self._send_json({
                 "channel": channel_id,
+                "network_id": network_id,
                 "history_key": history_key,
                 "messages": formatted_messages,
                 "pinned_message": pinned_msg,
@@ -621,8 +660,75 @@ class WebGatewayHandler(http.server.BaseHTTPRequestHandler):
         # Read JSON payload if applicable
         content_length = int(self.headers.get("Content-Length", 0))
 
+        # 0. Personal Private Network Routes
+        if path == "/api/network/create":
+            body = self.rfile.read(content_length).decode("utf-8")
+            data = json.loads(body)
+            client_id = data.get("client_id") or f"mob_{uuid.uuid4().hex[:6]}"
+            username = (data.get("username") or "Mobile User").strip() or "Mobile User"
+            custom_name = (data.get("network_name") or "").strip()
+            net_code = f"NET-{uuid.uuid4().hex[:6].upper()}"
+            final_name = custom_name or f"{username}'s Private Network"
+            net = self.server.get_or_create_network(
+                net_code,
+                network_name=final_name,
+                creator_id=client_id,
+                creator_name=username,
+            )
+            self.server.touch_client(client_id, username, self._get_client_ip(), net_code)
+            self._send_json({
+                "success": True,
+                "network_id": net_code,
+                "network_name": final_name,
+                "creator_id": client_id,
+                "rooms": sorted(list(net["rooms"])),
+                "members_count": len(net["members"]),
+            })
+            return
+
+        elif path == "/api/network/join":
+            body = self.rfile.read(content_length).decode("utf-8")
+            data = json.loads(body)
+            client_id = data.get("client_id") or f"mob_{uuid.uuid4().hex[:6]}"
+            username = (data.get("username") or "Mobile User").strip() or "Mobile User"
+            raw_code = (data.get("network_id") or data.get("code") or "").strip().upper()
+            if not raw_code:
+                self._send_json({"success": False, "error": "Network code is required"}, status=400)
+                return
+            net = self.server.get_or_create_network(
+                raw_code,
+                creator_id=client_id,
+                creator_name=username,
+            )
+            self.server.touch_client(client_id, username, self._get_client_ip(), raw_code)
+            self._send_json({
+                "success": True,
+                "network_id": raw_code,
+                "network_name": net["network_name"],
+                "rooms": sorted(list(net["rooms"])),
+                "members_count": len(net["members"]),
+            })
+            return
+
+        elif path == "/api/network/info":
+            body = self.rfile.read(content_length).decode("utf-8") if content_length > 0 else "{}"
+            data = json.loads(body) if body else {}
+            raw_code = (data.get("network_id") or "").strip().upper()
+            if not raw_code or raw_code not in self.server.networks:
+                self._send_json({"exists": False, "network_id": raw_code})
+            else:
+                net = self.server.networks[raw_code]
+                self._send_json({
+                    "exists": True,
+                    "network_id": raw_code,
+                    "network_name": net["network_name"],
+                    "creator_name": net.get("creator_name", ""),
+                    "members_count": len(net["members"]),
+                })
+            return
+
         # 1. Send Message Route
-        if path == "/api/send":
+        elif path == "/api/send":
             body = self.rfile.read(content_length).decode("utf-8")
             data = json.loads(body)
 
@@ -631,15 +737,47 @@ class WebGatewayHandler(http.server.BaseHTTPRequestHandler):
             raw_channel = data.get("channel")
             channel_id = None if raw_channel in (None, "", "null", "group") else raw_channel
             text = (data.get("text") or data.get("message") or "").strip()
+            raw_net = data.get("network_id") or data.get("net")
+            network_id = raw_net.strip().upper() if raw_net else (self.server.client_network.get(client_id) if client_id else None)
 
             if not text:
                 self._send_json({"success": False, "error": "Empty message"}, status=400)
                 return
 
-            self.server.touch_client(client_id, sender_name, self._get_client_ip())
+            self.server.touch_client(client_id, sender_name, self._get_client_ip(), network_id)
 
             now = time.time()
             timestamp_str = time.strftime("%H:%M:%S", time.localtime(now))
+            msg_id = f"{now}_{uuid.uuid4().hex[:6]}"
+
+            if network_id:
+                net = self.server.get_or_create_network(network_id, creator_id=client_id, creator_name=sender_name)
+                # Network-scoped message storage
+                if channel_id is None:
+                    h_key = None
+                elif channel_id in self.server.web_clients:
+                    h_key = f"dm_{min(client_id, channel_id)}_{max(client_id, channel_id)}"
+                else:
+                    h_key = channel_id
+
+                if h_key not in net["chat_histories"]:
+                    net["chat_histories"][h_key] = []
+
+                entry = {
+                    "id": msg_id,
+                    "timestamp": timestamp_str,
+                    "timestamp_epoch": now,
+                    "sender": f"{sender_name} 📱" if channel_id is None else (f"{sender_name} 📱 ({channel_id})" if str(channel_id).startswith("#") else f"{sender_name} 📱"),
+                    "sender_id": client_id,
+                    "message": text,
+                    "category": "room" if (channel_id and str(channel_id).startswith("#")) else ("dm" if channel_id else "peer"),
+                    "channel": channel_id,
+                    "reactions": {},
+                    "pinned": False,
+                }
+                net["chat_histories"][h_key].append(entry)
+                self._send_json({"success": True, "timestamp": timestamp_str, "server_time": now, "network_id": network_id})
+                return
 
             # Case A: Group Broadcast
             if channel_id is None:
@@ -822,6 +960,7 @@ class WebGatewayHandler(http.server.BaseHTTPRequestHandler):
                 channel_id = None
                 file_bytes = None
                 original_filename = None
+                network_id = None
 
                 for part in msg.iter_parts():
                     name = part.get_param("name", header="content-disposition")
@@ -829,6 +968,10 @@ class WebGatewayHandler(http.server.BaseHTTPRequestHandler):
                         sender_name = part.get_payload(decode=True).decode("utf-8", errors="replace")
                     elif name == "client_id":
                         client_id = part.get_payload(decode=True).decode("utf-8", errors="replace")
+                    elif name == "network_id":
+                        raw_net = part.get_payload(decode=True).decode("utf-8", errors="replace")
+                        if raw_net:
+                            network_id = raw_net.strip().upper()
                     elif name == "channel":
                         raw_ch = part.get_payload(decode=True).decode("utf-8", errors="replace")
                         channel_id = None if raw_ch in (None, "", "null", "group") else raw_ch
@@ -839,7 +982,10 @@ class WebGatewayHandler(http.server.BaseHTTPRequestHandler):
                 if not client_id:
                     client_id = f"mob_{ctx.peer_id[:4]}"
 
-                self.server.touch_client(client_id, sender_name, self._get_client_ip())
+                if not network_id and client_id:
+                    network_id = self.server.client_network.get(client_id)
+
+                self.server.touch_client(client_id, sender_name, self._get_client_ip(), network_id)
 
                 if file_bytes is None or not original_filename:
                     self._send_json({"success": False, "error": "No file uploaded"}, status=400)
@@ -873,6 +1019,36 @@ class WebGatewayHandler(http.server.BaseHTTPRequestHandler):
 
                 now = time.time()
                 timestamp_str = time.strftime("%H:%M:%S", time.localtime(now))
+
+                if network_id:
+                    net = self.server.get_or_create_network(network_id, creator_id=client_id, creator_name=sender_name)
+                    h_key = channel_id if channel_id not in (None, "", "null", "group") else None
+                    if h_key not in net["chat_histories"]:
+                        net["chat_histories"][h_key] = []
+                    net["chat_histories"][h_key].append({
+                        "id": f"{now}_{uuid.uuid4().hex[:6]}",
+                        "timestamp": timestamp_str,
+                        "timestamp_epoch": now,
+                        "sender": f"{sender_name} 📱",
+                        "sender_id": client_id,
+                        "message": notice_text,
+                        "category": file_category,
+                        "channel": channel_id,
+                        "reactions": {},
+                        "pinned": False,
+                    })
+                    self._send_json(
+                        {
+                            "success": True,
+                            "filename": original_filename,
+                            "filesize": filesize,
+                            "download_url": download_url,
+                            "file_type": file_category,
+                            "server_time": now,
+                            "network_id": network_id,
+                        }
+                    )
+                    return
 
                 # Case A: Group Broadcast
                 if channel_id is None:
@@ -1030,7 +1206,11 @@ class WebGatewayHandler(http.server.BaseHTTPRequestHandler):
                 return
 
             found_reactions = {}
-            for ch_history in ctx.chat_histories.values():
+            search_sources = list(ctx.chat_histories.values())
+            for net in self.server.networks.values():
+                search_sources.extend(net["chat_histories"].values())
+
+            for ch_history in search_sources:
                 for msg in ch_history:
                     if msg.get("id") == msg_id or msg.get("msg_id") == msg_id:
                         reactions = msg.setdefault("reactions", {})
@@ -1055,12 +1235,18 @@ class WebGatewayHandler(http.server.BaseHTTPRequestHandler):
             raw_channel = data.get("channel")
             channel_id = None if raw_channel in (None, "", "null", "group") else raw_channel
             pin_action = data.get("pin", True)
+            raw_net = data.get("network_id") or data.get("net")
 
             if not hasattr(ctx, "pinned_messages"):
                 ctx.pinned_messages = {}
 
             found_msg = None
-            for ch_id, ch_history in ctx.chat_histories.items():
+            search_sources = list(ctx.chat_histories.items())
+            if raw_net and raw_net.strip().upper() in self.server.networks:
+                net = self.server.networks[raw_net.strip().upper()]
+                search_sources.extend(net["chat_histories"].items())
+
+            for ch_id, ch_history in search_sources:
                 for msg in ch_history:
                     if msg.get("id") == msg_id or msg.get("msg_id") == msg_id:
                         msg["pinned"] = bool(pin_action)
@@ -1070,8 +1256,12 @@ class WebGatewayHandler(http.server.BaseHTTPRequestHandler):
 
             if pin_action and found_msg:
                 ctx.pinned_messages[channel_id] = found_msg
+                if raw_net and raw_net.strip().upper() in self.server.networks:
+                    self.server.networks[raw_net.strip().upper()]["pinned_messages"][channel_id] = found_msg
             elif not pin_action:
                 ctx.pinned_messages.pop(channel_id, None)
+                if raw_net and raw_net.strip().upper() in self.server.networks:
+                    self.server.networks[raw_net.strip().upper()]["pinned_messages"].pop(channel_id, None)
 
             self._send_json({"success": True, "pinned": pin_action, "channel": channel_id})
             return
@@ -1082,6 +1272,9 @@ class WebGatewayHandler(http.server.BaseHTTPRequestHandler):
             data = json.loads(body)
             room_name = (data.get("room") or "").strip()
             client_id = data.get("client_id")
+            raw_net = data.get("network_id") or data.get("net")
+            network_id = raw_net.strip().upper() if raw_net else (self.server.client_network.get(client_id) if client_id else None)
+
             if not room_name:
                 self._send_json({"success": False, "error": "Room name is required"}, status=400)
                 return
@@ -1089,17 +1282,21 @@ class WebGatewayHandler(http.server.BaseHTTPRequestHandler):
             if not room_name.startswith("#"):
                 room_name = "#" + room_name
 
-            if not hasattr(ctx, "custom_rooms"):
-                ctx.custom_rooms = set()
-            ctx.custom_rooms.add(room_name)
-
-            if client_id:
-                self.server.client_rooms.setdefault(client_id, set()).add(room_name)
-                c_rooms = sorted(list(self.server.client_rooms[client_id]))
+            if network_id and network_id in self.server.networks:
+                net = self.server.networks[network_id]
+                net["rooms"].add(room_name)
+                c_rooms = sorted(list(net["rooms"]))
             else:
-                c_rooms = sorted(list(ctx.custom_rooms))
+                if not hasattr(ctx, "custom_rooms"):
+                    ctx.custom_rooms = set()
+                ctx.custom_rooms.add(room_name)
+                if client_id:
+                    self.server.client_rooms.setdefault(client_id, set()).add(room_name)
+                    c_rooms = sorted(list(self.server.client_rooms[client_id]))
+                else:
+                    c_rooms = sorted(list(ctx.custom_rooms))
 
-            self._send_json({"success": True, "room": room_name, "rooms": c_rooms})
+            self._send_json({"success": True, "room": room_name, "rooms": c_rooms, "network_id": network_id})
             return
 
         # 8. Delete/Leave Custom Room Route: /api/room/delete
@@ -1108,6 +1305,9 @@ class WebGatewayHandler(http.server.BaseHTTPRequestHandler):
             data = json.loads(body)
             room_name = (data.get("room") or "").strip()
             client_id = data.get("client_id")
+            raw_net = data.get("network_id") or data.get("net")
+            network_id = raw_net.strip().upper() if raw_net else (self.server.client_network.get(client_id) if client_id else None)
+
             if not room_name:
                 self._send_json({"success": False, "error": "Room name is required"}, status=400)
                 return
@@ -1115,18 +1315,21 @@ class WebGatewayHandler(http.server.BaseHTTPRequestHandler):
             if not room_name.startswith("#"):
                 room_name = "#" + room_name
 
-            if not hasattr(ctx, "custom_rooms"):
-                ctx.custom_rooms = set()
-
-            ctx.custom_rooms.discard(room_name)
-
-            if client_id and client_id in self.server.client_rooms:
-                self.server.client_rooms[client_id].discard(room_name)
-                c_rooms = sorted(list(self.server.client_rooms[client_id]))
+            if network_id and network_id in self.server.networks:
+                net = self.server.networks[network_id]
+                net["rooms"].discard(room_name)
+                c_rooms = sorted(list(net["rooms"]))
             else:
-                c_rooms = sorted(list(ctx.custom_rooms))
+                if not hasattr(ctx, "custom_rooms"):
+                    ctx.custom_rooms = set()
+                ctx.custom_rooms.discard(room_name)
+                if client_id and client_id in self.server.client_rooms:
+                    self.server.client_rooms[client_id].discard(room_name)
+                    c_rooms = sorted(list(self.server.client_rooms[client_id]))
+                else:
+                    c_rooms = sorted(list(ctx.custom_rooms))
 
-            self._send_json({"success": True, "room": room_name, "rooms": c_rooms})
+            self._send_json({"success": True, "room": room_name, "rooms": c_rooms, "network_id": network_id})
             return
 
         self.send_error(404, "Endpoint not found")
@@ -1158,13 +1361,54 @@ class WebGatewayServer(http.server.ThreadingHTTPServer):
         self.ip_saved_names: Dict[str, str] = {}
         self.ip_client_ids: Dict[str, str] = {}
         self.client_rooms: Dict[str, Set[str]] = {}
+        self.networks: Dict[str, dict] = {}
+        self.client_network: Dict[str, str] = {}
 
-    def touch_client(self, client_id: str, username: str, ip_address: str) -> None:
+    def get_or_create_network(
+        self,
+        network_id: str,
+        network_name: Optional[str] = None,
+        creator_id: Optional[str] = None,
+        creator_name: Optional[str] = None,
+    ) -> dict:
+        """Retrieves or instantiates an isolated Personal Private Network scoped to network_id."""
+        network_id = network_id.strip().upper()
+        now = time.time()
+        with self.clients_lock:
+            if network_id not in self.networks:
+                self.networks[network_id] = {
+                    "network_id": network_id,
+                    "network_name": network_name or (f"{creator_name}'s Network" if creator_name else f"Private Network ({network_id})"),
+                    "creator_id": creator_id,
+                    "creator_name": creator_name,
+                    "created_at": now,
+                    "members": set([creator_id]) if creator_id else set(),
+                    "rooms": set(),
+                    "chat_histories": {None: []},
+                    "pinned_messages": {},
+                }
+            net = self.networks[network_id]
+            if network_name:
+                net["network_name"] = network_name
+            if creator_id:
+                net["members"].add(creator_id)
+                self.client_network[creator_id] = network_id
+            return net
+
+    def touch_client(self, client_id: str, username: str, ip_address: str, network_id: Optional[str] = None) -> None:
         """Records or updates a web client's presence by unique client_id without evicting peers sharing an IP/proxy."""
         if not client_id:
             return
         now = time.time()
         with self.clients_lock:
+            if network_id:
+                network_id = network_id.strip().upper()
+                self.client_network[client_id] = network_id
+                if network_id in self.networks:
+                    self.networks[network_id]["members"].add(client_id)
+            elif client_id in self.client_network:
+                network_id = self.client_network[client_id]
+
             # If user had a previously set custom name for this client_id, restore it if incoming is default
             if username in ("Mobile User", "Peer", "", None) and client_id in self.client_saved_names:
                 username = self.client_saved_names[client_id]
@@ -1186,6 +1430,7 @@ class WebGatewayServer(http.server.ThreadingHTTPServer):
                 "username": username,
                 "device_name": "Mobile Browser",
                 "ip_address": ip_address,
+                "network_id": network_id,
                 "last_seen": now,
             }
 
@@ -1212,6 +1457,9 @@ class WebGatewayServer(http.server.ThreadingHTTPServer):
                     self.client_read_times.pop(cid, None)
                     self.client_connect_times.pop(cid, None)
                     self.client_last_notified.pop(cid, None)
+                    net_id = self.client_network.pop(cid, None)
+                    if net_id and net_id in self.networks:
+                        self.networks[net_id]["members"].discard(cid)
 
         for cid in dead:
             if hasattr(self.app_context, "remove_web_peer"):

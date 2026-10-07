@@ -51,8 +51,13 @@
           </svg>
         </button>
         <div class="brand-info">
-          <h1 class="brand-title">📡 LAN Chat</h1>
-          <span class="online-indicator"><span class="glow-dot"></span> <span id="online-count">1 Peer</span></span>
+          <div class="brand-title-row">
+            <h1 class="brand-title">📡 LAN Chat</h1>
+            <button id="nav-network-pill" class="network-badge-chip" onclick="openInviteModal()" title="View & Share Network Code">
+              🔒 <span id="nav-network-id">Personal Network</span>
+            </button>
+          </div>
+          <span class="online-indicator"><span class="glow-dot"></span> <span id="online-count">1 Member</span></span>
         </div>
       </div>
 
@@ -94,6 +99,25 @@
 
         <!-- Channels & Peers List -->
         <div class="channels-scroll">
+          <!-- Active Personal Network Card -->
+          <div class="sidebar-network-card glass-panel">
+            <div class="sidebar-network-header">
+              <span class="sidebar-network-icon">🌐</span>
+              <div class="sidebar-network-meta">
+                <strong id="sidebar-network-name">Personal Private Network</strong>
+                <div class="sidebar-network-code-row">
+                  <span class="network-code-tag">CODE:</span>
+                  <code id="sidebar-network-code">---</code>
+                  <button type="button" class="btn-copy-chip" onclick="copyNetworkCode()" title="Copy Network Code">📋</button>
+                </div>
+              </div>
+            </div>
+            <div class="sidebar-network-actions">
+              <button type="button" class="btn-network-chip-btn" onclick="openInviteModal()">🔗 Invite</button>
+              <button type="button" class="btn-network-chip-btn" onclick="openJoinNetworkModal()">🔑 Switch</button>
+            </div>
+          </div>
+
           <div class="section-label-row">
             <span class="section-label">ROOMS</span>
             <div class="room-action-chips">
@@ -105,8 +129,8 @@
           <div id="channel-group" class="peer-item" onclick="selectChannel('group')">
             <div class="peer-avatar group-avatar">🌐</div>
             <div class="peer-details">
-              <span class="peer-name">Local LAN Broadcast</span>
-              <span class="peer-sub">All devices on local Wi-Fi</span>
+              <span class="peer-name">Network Lobby</span>
+              <span class="peer-sub">All members in your private network</span>
             </div>
             <span id="badge-group" class="unread-pill hidden">0</span>
           </div>
@@ -114,9 +138,9 @@
           <!-- Dynamically populated custom rooms list -->
           <div id="custom-rooms-list" class="custom-rooms-list"></div>
 
-          <div class="section-label">ACTIVE LAN PEERS (<span id="peers-count-label">0</span>)</div>
+          <div class="section-label">ACTIVE NETWORK MEMBERS (<span id="peers-count-label">0</span>)</div>
           <div id="peers-list" class="peers-list">
-            <div class="empty-peers">Searching for LAN peers...</div>
+            <div class="empty-peers">You are the only member. Invite friends to join!</div>
           </div>
         </div>
 
@@ -418,6 +442,34 @@
     </div>
   </div>
 
+  <!-- Join Personal Private Network Modal -->
+  <div id="join-network-modal" class="modal-overlay hidden">
+    <div class="glass-card modal-box-sm">
+      <div class="modal-header">
+        <div class="modal-title-group">
+          <h3>🔑 Join Private Network</h3>
+          <p class="modal-subtitle">Enter a 6-character Network Code or link to connect</p>
+        </div>
+        <button class="modal-close-btn" onclick="closeJoinNetworkModal()">✕</button>
+      </div>
+      <form onsubmit="event.preventDefault(); handleJoinNetworkSubmit();">
+        <div class="input-group">
+          <label for="input-join-network-code">Network Code</label>
+          <input type="text" id="input-join-network-code" placeholder="e.g. NET-8K2D9P" maxlength="16" required autocomplete="off" style="text-transform: uppercase;">
+          <small class="field-hint">You will enter this private network with 0 strangers.</small>
+        </div>
+        <div class="input-group">
+          <label for="input-join-network-name">Your Display Name</label>
+          <input type="text" id="input-join-network-name" placeholder="e.g. Alex" maxlength="20" autocomplete="off">
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn-secondary" onclick="closeJoinNetworkModal()">Cancel</button>
+          <button type="submit" class="btn-primary">Join Network ➔</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
   <!-- Join Room by Code / Name Modal -->
   <div id="join-room-modal" class="modal-overlay hidden">
     <div class="glass-card modal-box-sm">
@@ -625,6 +677,8 @@
               Instantly chat, stream 100MB+ files, record voice notes, and host encrypted private rooms across smartphones, laptops, and PCs over your local Wi-Fi, phone hotspot, or mobile cellular data. No cloud accounts, no tracking, zero external dependencies.
             </p>
 
+            <div id="landing-invite-banner" class="landing-invite-banner hidden"></div>
+
             <!-- Quick Nickname & Direct Action Entry -->
             <div class="landing-quick-join">
               <div class="landing-nickname-box">
@@ -632,35 +686,35 @@
                 <input type="text" id="landing-input-nickname" class="landing-nickname-input" placeholder="Choose your display name (e.g. Alex)..." maxlength="24" autocomplete="off" />
               </div>
               <div class="landing-hero-btn-row">
-                <button type="button" class="btn-primary landing-btn-cta" onclick="launchChatFromLanding()">
-                  💬 Enter LAN Chat ➔
+                <button type="button" class="btn-primary landing-btn-cta" id="btn-landing-primary" onclick="launchChatFromLanding()">
+                  🚀 Start My Personal Network ➔
                 </button>
-                <button type="button" class="btn-secondary landing-btn-cta-sec" onclick="startPrivateNetworkFlow()">
-                  🔒 Start Private Room
+                <button type="button" class="btn-secondary landing-btn-cta-sec" onclick="openJoinNetworkModal()">
+                  🔑 Join Network with Code
                 </button>
               </div>
             </div>
 
             <!-- 3 Quick Action Cards -->
             <div class="landing-actions-grid">
-              <!-- Action 1: Enter Live Chat -->
+              <!-- Action 1: Enter Live Chat / Start Personal Network -->
               <div class="landing-action-card card-primary" onclick="launchChatFromLanding()">
-                <div class="card-icon">💬</div>
+                <div class="card-icon">🚀</div>
                 <div class="card-info">
-                  <h4>Enter Live Chat</h4>
-                  <p>Join broadcast or topic channels immediately with your local peers.</p>
+                  <h4>Start Personal Network</h4>
+                  <p>Instant isolated private network. You are the only peer until you invite others.</p>
                 </div>
-                <button type="button" class="btn-card-action">Launch Chat ➔</button>
+                <button type="button" class="btn-card-action">Enter Live Chat ➔</button>
               </div>
 
               <!-- Action 2: Start Private Network / Room -->
               <div class="landing-action-card card-accent" onclick="startPrivateNetworkFlow()">
-                <div class="card-icon">🔒</div>
+                <div class="card-icon">🔑</div>
                 <div class="card-info">
                   <h4>Start Private Network</h4>
-                  <p>Create a custom room with passkey, 1-click invite link &amp; dynamic QR code.</p>
+                  <p>Create a custom network code, 1-click invite link &amp; dynamic QR code.</p>
                 </div>
-                <button type="button" class="btn-card-action">Create Room ➔</button>
+                <button type="button" class="btn-card-action">Create Network ➔</button>
               </div>
 
               <!-- Action 3: Offline Mode Guide -->

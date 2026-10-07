@@ -301,9 +301,10 @@ function saveUsername(name) {
   setCookie("lanchat_username", name);
 }
 
-function getSavedRooms() {
+function getSavedRooms(netId = null) {
   try {
-    const raw = localStorage.getItem("lanchat_my_rooms");
+    const key = netId ? `lanchat_rooms_${netId}` : ((typeof state !== "undefined" && state.networkId) ? `lanchat_rooms_${state.networkId}` : "lanchat_my_rooms");
+    const raw = localStorage.getItem(key);
     return raw ? JSON.parse(raw) : [];
   } catch (e) {
     return [];
@@ -312,7 +313,8 @@ function getSavedRooms() {
 
 function saveMyRooms() {
   try {
-    localStorage.setItem("lanchat_my_rooms", JSON.stringify(state.customRooms || []));
+    const key = (typeof state !== "undefined" && state.networkId) ? `lanchat_rooms_${state.networkId}` : "lanchat_my_rooms";
+    localStorage.setItem(key, JSON.stringify(state.customRooms || []));
   } catch (e) {}
 }
 
@@ -320,9 +322,12 @@ function saveMyRooms() {
 const state = {
   clientId: getOrCreateClientId(),
   username: getSavedUsername(),
+  networkId: localStorage.getItem("lanchat_network_id") || null,
+  networkName: localStorage.getItem("lanchat_network_name") || "Personal Private Network",
+  pendingNetworkInvite: null,
   currentChannel: null, // null = No active room (Welcome hub); "group" = Local Broadcast; "#room" = Custom Room; or peer_id = Direct DM
   peers: [],
-  customRooms: getSavedRooms(),
+  customRooms: getSavedRooms(localStorage.getItem("lanchat_network_id")),
   roomSecrets: JSON.parse(localStorage.getItem("lanchat_room_secrets") || "{}"),
   pinnedMessage: null,
   renderedMessageIds: new Set(),
@@ -454,18 +459,32 @@ const dom = {
   landingModal: document.getElementById("landing-modal"),
   chkSkipLanding: document.getElementById("chk-skip-landing"),
   landingInputNickname: document.getElementById("landing-input-nickname"),
+  navNetworkPill: document.getElementById("nav-network-pill"),
+  navNetworkId: document.getElementById("nav-network-id"),
+  sidebarNetworkName: document.getElementById("sidebar-network-name"),
+  sidebarNetworkCode: document.getElementById("sidebar-network-code"),
+  joinNetworkModal: document.getElementById("join-network-modal"),
+  inputJoinNetworkCode: document.getElementById("input-join-network-code"),
+  inputJoinNetworkName: document.getElementById("input-join-network-name"),
+  landingInviteBanner: document.getElementById("landing-invite-banner"),
+  btnLandingPrimary: document.getElementById("btn-landing-primary"),
 };
 
 // ========================================================
 // Initialization
 // ========================================================
 window.addEventListener("DOMContentLoaded", () => {
-  // Check for auto-join room or name from URL query parameters (?room=math or ?join=math&name=Alex)
+  // Check for auto-join room, network, or name from URL query parameters (?room=math, ?net=NET-123456, ?name=Alex)
   const urlParams = new URLSearchParams(window.location.search);
   const userParam = (urlParams.get("name") || urlParams.get("user") || "").trim();
   if (userParam && !state.username) {
     state.username = userParam;
     localStorage.setItem("lanchat_username", userParam);
+  }
+
+  const netParam = (urlParams.get("net") || urlParams.get("network") || urlParams.get("code") || "").trim();
+  if (netParam) {
+    state.pendingNetworkInvite = netParam.toUpperCase();
   }
 
   const roomParam = (urlParams.get("room") || urlParams.get("join") || "").trim();
@@ -477,32 +496,25 @@ window.addEventListener("DOMContentLoaded", () => {
   updateNotifIcon();
   updateEncryptionIcon();
   updateControlCenterUI();
+  updateNetworkUI();
   setupEventHandlers();
   setupDragAndDrop();
 
   // Request browser notification permission on first user gesture
   document.addEventListener("click", () => requestNotificationPermission(), { once: true });
 
-  if (!state.username) {
-    if (state.pendingAutoJoin) {
-      dom.loginModal.classList.remove("hidden");
-      const banner = document.getElementById("login-invite-banner");
-      if (banner) {
-        const roomTitle = state.pendingAutoJoin === "group" ? "🌐 Group Broadcast" : state.pendingAutoJoin;
-        banner.innerHTML = `<span>🎯 Invited to room <strong>${escapeHtml(roomTitle)}</strong></span>`;
-        banner.classList.remove("hidden");
-      }
-      dom.inputUsername.focus();
-    } else {
-      // First visit / direct visit: ALWAYS show the full-page Landing Portal covering the entire page!
-      dom.loginModal.classList.add("hidden");
-      openLandingModal();
-    }
+  const hasVisitedBefore = localStorage.getItem("lanchat_visited") === "true";
+  const shouldSkipLanding = localStorage.getItem("lanchat_skip_landing") === "true";
+
+  if (!state.networkId || !state.username || state.pendingNetworkInvite || !hasVisitedBefore) {
+    // First visit, direct visit without personal network, or arrived via network invite link:
+    // ALWAYS open the Guide Page / Landing Modal covering the entire page!
+    if (dom.loginModal) dom.loginModal.classList.add("hidden");
+    openLandingModal();
   } else {
     dom.loginModal.classList.add("hidden");
     initUserSession();
     // Option 3 Hybrid Launch: Show full-page landing portal for direct visitors unless they opted to skip
-    const shouldSkipLanding = localStorage.getItem("lanchat_skip_landing") === "true";
     if (!state.pendingAutoJoin && !shouldSkipLanding) {
       openLandingModal();
     }
@@ -567,6 +579,9 @@ function setupEventHandlers() {
   }
   if (dom.btnOpenJoinRoom) {
     dom.btnOpenJoinRoom.addEventListener("click", openJoinRoomModal);
+  }
+  if (dom.navNetworkPill) {
+    dom.navNetworkPill.addEventListener("click", openJoinNetworkModal);
   }
 
   // Theme switcher
@@ -771,10 +786,21 @@ function setupDragAndDrop() {
 async function fetchStatus() {
   try {
     const joinedRoomsParam = (state.customRooms || []).join(",");
-    const url = `/api/status?client_id=${encodeURIComponent(state.clientId)}&username=${encodeURIComponent(state.username || "Mobile User")}&rooms=${encodeURIComponent(joinedRoomsParam)}`;
+    let url = `/api/status?client_id=${encodeURIComponent(state.clientId)}&username=${encodeURIComponent(state.username || "Mobile User")}&rooms=${encodeURIComponent(joinedRoomsParam)}`;
+    if (state.networkId) {
+      url += `&network_id=${encodeURIComponent(state.networkId)}`;
+    }
     const res = await fetch(url);
     if (!res.ok) return;
     const data = await res.json();
+
+    if (data.network_id && data.network_id !== state.networkId) {
+      state.networkId = data.network_id;
+      if (data.network_name) state.networkName = data.network_name;
+      localStorage.setItem("lanchat_network_id", state.networkId);
+      localStorage.setItem("lanchat_network_name", state.networkName);
+      updateNetworkUI();
+    }
 
     // Auto-adopt remembered username from server only if local session name is completely empty
     if (!state.username && data.remembered_username && data.remembered_username !== "Mobile User") {
@@ -791,13 +817,23 @@ async function fetchStatus() {
     }
 
     if (Array.isArray(data.rooms)) {
-      // Merge unique confirmed rooms
-      const merged = Array.from(new Set([...state.customRooms, ...data.rooms]));
-      const roomsChanged = JSON.stringify(merged) !== JSON.stringify(state.customRooms);
-      state.customRooms = merged;
-      saveMyRooms();
-      if (roomsChanged) {
-        renderCustomRooms();
+      if (state.networkId) {
+        // Strict network scoping: the network defines the rooms list
+        const roomsChanged = JSON.stringify(data.rooms) !== JSON.stringify(state.customRooms);
+        state.customRooms = data.rooms;
+        saveMyRooms();
+        if (roomsChanged) {
+          renderCustomRooms();
+        }
+      } else {
+        // Merge unique confirmed rooms
+        const merged = Array.from(new Set([...state.customRooms, ...data.rooms]));
+        const roomsChanged = JSON.stringify(merged) !== JSON.stringify(state.customRooms);
+        state.customRooms = merged;
+        saveMyRooms();
+        if (roomsChanged) {
+          renderCustomRooms();
+        }
       }
     }
 
@@ -808,9 +844,9 @@ async function fetchStatus() {
         renderPeersList(data.peers);
         renderP2PHubList();
 
-        const count = data.peers.length;
-        dom.onlineCount.textContent = `${count} Peer${count === 1 ? "" : "s"}`;
-        dom.peersCountLabel.textContent = count;
+        const count = state.networkId ? data.peers.length + 1 : data.peers.length;
+        dom.onlineCount.textContent = `${count} Online`;
+        dom.peersCountLabel.textContent = data.peers.length;
       }
     }
 
@@ -869,7 +905,17 @@ function renderPeersList(peers) {
   dom.peersList.innerHTML = "";
 
   if (peers.length === 0) {
-    dom.peersList.innerHTML = `<div class="empty-peers">Searching for LAN peers...</div>`;
+    if (state.networkId) {
+      dom.peersList.innerHTML = `
+        <div class="empty-peers personal-network-empty">
+          <div class="empty-peers-icon">👤</div>
+          <div class="empty-peers-title">Only you are here</div>
+          <div class="empty-peers-sub">Share your invite link or code to chat privately.</div>
+          <button type="button" class="btn-network-invite-sm" onclick="openInviteModal()">➕ Invite Friends</button>
+        </div>`;
+    } else {
+      dom.peersList.innerHTML = `<div class="empty-peers">Searching for LAN peers...</div>`;
+    }
     return;
   }
 
@@ -954,8 +1000,10 @@ async function fetchMessages() {
   }
   const channelParam = state.currentChannel;
   try {
-    const isInitialLoad = state.lastPollTime === 0;
-    const url = `/api/messages?channel=${encodeURIComponent(channelParam)}&client_id=${encodeURIComponent(state.clientId)}&username=${encodeURIComponent(state.username || "Mobile User")}&since=${state.lastPollTime}`;
+    let url = `/api/messages?channel=${encodeURIComponent(channelParam)}&client_id=${encodeURIComponent(state.clientId)}&username=${encodeURIComponent(state.username || "Mobile User")}&since=${state.lastPollTime}`;
+    if (state.networkId) {
+      url += `&network_id=${encodeURIComponent(state.networkId)}`;
+    }
     const res = await fetch(url);
     if (!res.ok) return;
     const data = await res.json();
@@ -1458,6 +1506,9 @@ function uploadFileWithProgress(file) {
   formData.append("sender", state.username || "Mobile User");
   formData.append("client_id", state.clientId);
   formData.append("channel", state.currentChannel || "group");
+  if (state.networkId) {
+    formData.append("network_id", state.networkId);
+  }
   formData.append("file", file);
 
   // Show progress card
@@ -1637,7 +1688,11 @@ async function handleCreateRoomSubmit() {
     const res = await fetch("/api/room/create", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ room: formattedName, client_id: state.clientId }),
+      body: JSON.stringify({
+        room: formattedName,
+        client_id: state.clientId,
+        network_id: state.networkId || null,
+      }),
     });
     if (res.ok) {
       const data = await res.json();
@@ -1691,7 +1746,11 @@ async function deleteRoom(roomName) {
     await fetch("/api/room/delete", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ room: roomName, client_id: state.clientId }),
+      body: JSON.stringify({
+        room: roomName,
+        client_id: state.clientId,
+        network_id: state.networkId || null,
+      }),
     });
   } catch (err) {}
 
@@ -1897,7 +1956,15 @@ function updateInviteUrl() {
   }
 
   const protocol = window.location.protocol || "http:";
-  const url = `${protocol}//${hostAddress}/?room=${encodeURIComponent(cleanRoom)}`;
+  const queryParts = [];
+  if (cleanRoom && cleanRoom !== "group") {
+    queryParts.push(`room=${encodeURIComponent(cleanRoom)}`);
+  }
+  if (state.networkId) {
+    queryParts.push(`net=${encodeURIComponent(state.networkId)}`);
+  }
+  const queryStr = queryParts.length > 0 ? `?${queryParts.join("&")}` : "";
+  const url = `${protocol}//${hostAddress}/${queryStr}`;
 
   if (dom.inviteLinkInput) {
     dom.inviteLinkInput.value = url;
@@ -2016,6 +2083,27 @@ function openLandingModal() {
   if (dom.loginModal) {
     dom.loginModal.classList.add("hidden");
   }
+
+  // Handle network invitation banner
+  if (state.pendingNetworkInvite) {
+    if (dom.landingInviteBanner) {
+      dom.landingInviteBanner.innerHTML = `<span>🎯 You are invited to join Private Network: <strong>${escapeHtml(state.pendingNetworkInvite)}</strong></span>`;
+      dom.landingInviteBanner.classList.remove("hidden");
+    }
+    if (dom.btnLandingPrimary) {
+      dom.btnLandingPrimary.textContent = "🚀 Join Private Network ➔";
+    }
+  } else {
+    if (dom.landingInviteBanner) {
+      dom.landingInviteBanner.classList.add("hidden");
+    }
+    if (dom.btnLandingPrimary) {
+      dom.btnLandingPrimary.textContent = state.networkId
+        ? "🚀 Enter My Personal Network ➔"
+        : "🚀 Start My Personal Network ➔";
+    }
+  }
+
   dom.landingModal.classList.remove("hidden");
   if (dom.landingInputNickname && !state.username) {
     setTimeout(() => {
@@ -2039,40 +2127,39 @@ function closeLandingModal(savePreference = false) {
   }
 }
 
-function launchChatFromLanding() {
+async function startPersonalNetworkFromLanding() {
   const enteredName = dom.landingInputNickname ? dom.landingInputNickname.value.trim() : "";
   if (enteredName) {
     saveUsername(enteredName);
     initUserSession();
+  } else if (!state.username) {
+    const defaultName = "Peer-" + Math.floor(1000 + Math.random() * 9000);
+    saveUsername(defaultName);
+    initUserSession();
   }
+
   closeLandingModal(true);
-  if (!state.username) {
-    if (dom.loginModal) dom.loginModal.classList.remove("hidden");
-    if (dom.inputUsername) dom.inputUsername.focus();
+  localStorage.setItem("lanchat_visited", "true");
+
+  if (state.pendingNetworkInvite) {
+    await joinNetwork(state.pendingNetworkInvite, state.username);
+    state.pendingNetworkInvite = null;
+  } else if (!state.networkId) {
+    await createPersonalNetwork();
   } else {
-    if (dom.messageInput) dom.messageInput.focus();
+    updateNetworkUI();
+    fetchStatus();
   }
+
+  if (dom.messageInput) dom.messageInput.focus();
+}
+
+function launchChatFromLanding() {
+  startPersonalNetworkFromLanding();
 }
 
 function startPrivateNetworkFlow() {
-  const enteredName = dom.landingInputNickname ? dom.landingInputNickname.value.trim() : "";
-  if (enteredName) {
-    saveUsername(enteredName);
-    initUserSession();
-  }
-  closeLandingModal(true);
-  if (!state.username) {
-    if (dom.loginModal) dom.loginModal.classList.remove("hidden");
-    if (dom.inputUsername) dom.inputUsername.focus();
-    showToastNotification({
-      id: "toast_login_req_" + Date.now(),
-      sender: "🔒 Private Network",
-      message: "Please choose your display name to start or share private rooms.",
-      channel: null,
-    });
-  } else {
-    openRoomModal();
-  }
+  startPersonalNetworkFromLanding();
 }
 
 function scrollToOfflineGuide() {
@@ -2080,6 +2167,171 @@ function scrollToOfflineGuide() {
   if (offlineSection) {
     offlineSection.scrollIntoView({ behavior: "smooth", block: "start" });
   }
+}
+
+// Personal Network Creation & Management
+async function createPersonalNetwork(customName = null) {
+  try {
+    const netName = customName || (state.username ? `${state.username}'s Network` : "Personal Private Network");
+    const res = await fetch("/api/network/create", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        creator_id: state.clientId,
+        creator_name: state.username || "Mobile User",
+        network_name: netName,
+      }),
+    });
+    if (!res.ok) {
+      showToastNotification({
+        id: "err_net_" + Date.now(),
+        sender: "⚠️ Network Error",
+        message: "Failed to create personal network.",
+        channel: null,
+      });
+      return null;
+    }
+    const data = await res.json();
+    state.networkId = data.network_id;
+    state.networkName = data.network_name || "Personal Private Network";
+    localStorage.setItem("lanchat_network_id", state.networkId);
+    localStorage.setItem("lanchat_network_name", state.networkName);
+
+    // Reset local custom rooms for this brand new isolated network
+    state.customRooms = [];
+    state.renderedMessageIds.clear();
+    saveMyRooms();
+    renderCustomRooms();
+    updateNetworkUI();
+    await fetchStatus();
+
+    showToastNotification({
+      id: "toast_net_created_" + Date.now(),
+      sender: "🌐 Private Network Ready",
+      message: `Created Network ${data.network_id}. You are the only member.`,
+      channel: null,
+    });
+    return data.network_id;
+  } catch (err) {
+    console.error("createPersonalNetwork error:", err);
+    return null;
+  }
+}
+
+async function joinNetwork(networkCode, nickname = null) {
+  const code = (networkCode || "").trim().toUpperCase();
+  if (!code) return false;
+
+  const user = nickname || state.username || "Mobile User";
+  if (!state.username && user) {
+    saveUsername(user);
+    initUserSession();
+  }
+
+  try {
+    const res = await fetch("/api/network/join", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        network_id: code,
+        client_id: state.clientId,
+        username: user,
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok || !data.success) {
+      showToastNotification({
+        id: "err_join_" + Date.now(),
+        sender: "⚠️ Join Failed",
+        message: data.error || "Network not found or invalid.",
+        channel: null,
+      });
+      return false;
+    }
+
+    state.networkId = data.network_id;
+    state.networkName = data.network_name || "Personal Private Network";
+    localStorage.setItem("lanchat_network_id", state.networkId);
+    localStorage.setItem("lanchat_network_name", state.networkName);
+
+    state.customRooms = Array.isArray(data.rooms) ? data.rooms : [];
+    state.renderedMessageIds.clear();
+    saveMyRooms();
+    renderCustomRooms();
+    updateNetworkUI();
+    closeJoinNetworkModal();
+    await fetchStatus();
+
+    showToastNotification({
+      id: "toast_net_joined_" + Date.now(),
+      sender: "🔑 Network Connected",
+      message: `Joined private network ${data.network_id}`,
+      channel: null,
+    });
+    return true;
+  } catch (err) {
+    console.error("joinNetwork error:", err);
+    return false;
+  }
+}
+
+function updateNetworkUI() {
+  const netId = state.networkId || "OFFLINE";
+  const netName = state.networkName || "Personal Private Network";
+
+  if (dom.navNetworkId) dom.navNetworkId.textContent = netId;
+  if (dom.sidebarNetworkCode) dom.sidebarNetworkCode.textContent = netId;
+  if (dom.sidebarNetworkName) dom.sidebarNetworkName.textContent = netName;
+}
+
+function copyNetworkCode() {
+  if (!state.networkId) {
+    showToastNotification({
+      id: "toast_no_net_" + Date.now(),
+      sender: "ℹ️ Network Code",
+      message: "No active network yet. Click Start Personal Network.",
+      channel: null,
+    });
+    return;
+  }
+  navigator.clipboard.writeText(state.networkId).then(() => {
+    showToastNotification({
+      id: "toast_copy_net_" + Date.now(),
+      sender: "📋 Copied Code",
+      message: `Network code ${state.networkId} copied to clipboard!`,
+      channel: null,
+    });
+  }).catch(() => {
+    prompt("Copy network code:", state.networkId);
+  });
+}
+
+function openJoinNetworkModal() {
+  if (!dom.joinNetworkModal) return;
+  dom.joinNetworkModal.classList.remove("hidden");
+  if (dom.inputJoinNetworkCode) {
+    dom.inputJoinNetworkCode.value = state.pendingNetworkInvite || "";
+    dom.inputJoinNetworkCode.focus();
+  }
+  if (dom.inputJoinNetworkName && state.username) {
+    dom.inputJoinNetworkName.value = state.username;
+  }
+}
+
+function closeJoinNetworkModal() {
+  if (!dom.joinNetworkModal) return;
+  dom.joinNetworkModal.classList.add("hidden");
+}
+
+async function handleJoinNetworkSubmit() {
+  const code = (dom.inputJoinNetworkCode ? dom.inputJoinNetworkCode.value : "").trim();
+  const name = (dom.inputJoinNetworkName ? dom.inputJoinNetworkName.value : "").trim();
+  if (!code) return;
+  if (name) {
+    saveUsername(name);
+    initUserSession();
+  }
+  await joinNetwork(code, name);
 }
 
 // Ensure globally accessible for inline onclick handlers
@@ -2092,22 +2344,19 @@ window.openEncryptionModal = openEncryptionModal;
 window.closeEncryptionModal = closeEncryptionModal;
 window.saveRoomEncryption = saveRoomEncryption;
 window.disableRoomEncryption = disableRoomEncryption;
+window.startPersonalNetworkFromLanding = startPersonalNetworkFromLanding;
+window.createPersonalNetwork = createPersonalNetwork;
+window.joinNetwork = joinNetwork;
+window.openJoinNetworkModal = openJoinNetworkModal;
+window.closeJoinNetworkModal = closeJoinNetworkModal;
+window.handleJoinNetworkSubmit = handleJoinNetworkSubmit;
+window.copyNetworkCode = copyNetworkCode;
 
 // ========================================================
 // Room End-to-End Encryption
 // ========================================================
 function openEncryptionModal(targetChannel = null) {
-  const channel = targetChannel || state.currentChannel;
-  if (!channel) {
-    showToastNotification({
-      id: "toast_lock_warn_" + Date.now(),
-      sender: "🔒 Room Lock",
-      message: "Please select or create a room first to configure its lock.",
-      channel: null,
-    });
-    openRoomModal();
-    return;
-  }
+  const channel = targetChannel || state.currentChannel || "group";
 
   if (!dom.encryptionModal) return;
   dom.encryptionModal.classList.remove("hidden");
@@ -2318,6 +2567,7 @@ async function sendMessage() {
     client_id: state.clientId,
     channel: state.currentChannel,
     text: textToSend,
+    network_id: state.networkId || null,
   };
 
   try {
