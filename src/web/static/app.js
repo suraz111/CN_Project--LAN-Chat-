@@ -503,21 +503,13 @@ window.addEventListener("DOMContentLoaded", () => {
   // Request browser notification permission on first user gesture
   document.addEventListener("click", () => requestNotificationPermission(), { once: true });
 
-  const hasVisitedBefore = localStorage.getItem("lanchat_visited") === "true";
-  const shouldSkipLanding = localStorage.getItem("lanchat_skip_landing") === "true";
+  if (dom.loginModal) dom.loginModal.classList.add("hidden");
+  if (state.username) initUserSession();
 
-  if (!state.networkId || !state.username || state.pendingNetworkInvite || !hasVisitedBefore) {
-    // First visit, direct visit without personal network, or arrived via network invite link:
-    // ALWAYS open the Guide Page / Landing Modal covering the entire page!
-    if (dom.loginModal) dom.loginModal.classList.add("hidden");
+  // Landing page is fixed to Guide Page on page load / link navigation
+  const shouldSkipLanding = false;
+  if (!state.pendingAutoJoin && !shouldSkipLanding) {
     openLandingModal();
-  } else {
-    dom.loginModal.classList.add("hidden");
-    initUserSession();
-    // Option 3 Hybrid Launch: Show full-page landing portal for direct visitors unless they opted to skip
-    if (!state.pendingAutoJoin && !shouldSkipLanding) {
-      openLandingModal();
-    }
   }
 
   // Initial fetch of host status and peers
@@ -869,10 +861,7 @@ function renderCustomRooms() {
   if (state.customRooms.length === 0) {
     const emptyItem = document.createElement("div");
     emptyItem.className = "empty-rooms-box";
-    emptyItem.innerHTML = `
-      <span class="empty-rooms-hint">No active rooms</span>
-      <button type="button" class="btn-create-room-chip" onclick="openRoomModal()">➕ Create Room</button>
-    `;
+    emptyItem.innerHTML = `<span class="empty-rooms-hint">No active topic rooms</span>`;
     dom.customRoomsList.appendChild(emptyItem);
     return;
   }
@@ -910,8 +899,7 @@ function renderPeersList(peers) {
         <div class="empty-peers personal-network-empty">
           <div class="empty-peers-icon">👤</div>
           <div class="empty-peers-title">Only you are here</div>
-          <div class="empty-peers-sub">Share your invite link or code to chat privately.</div>
-          <button type="button" class="btn-network-invite-sm" onclick="openInviteModal()">➕ Invite Friends</button>
+          <div class="empty-peers-sub">Share your network using the 🔗 Invite button above to chat privately.</div>
         </div>`;
     } else {
       dom.peersList.innerHTML = `<div class="empty-peers">Searching for LAN peers...</div>`;
@@ -2117,13 +2105,6 @@ function openLandingModal() {
 function closeLandingModal(savePreference = false) {
   if (dom.landingModal) {
     dom.landingModal.classList.add("hidden");
-  }
-  if (savePreference && dom.chkSkipLanding) {
-    if (dom.chkSkipLanding.checked) {
-      localStorage.setItem("lanchat_skip_landing", "true");
-    } else {
-      localStorage.removeItem("lanchat_skip_landing");
-    }
   }
 }
 
