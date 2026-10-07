@@ -428,6 +428,9 @@ const dom = {
   ctrlThemeIcon: document.getElementById("ctrl-theme-icon"),
   ctrlSoundIcon: document.getElementById("ctrl-sound-icon"),
   btnHeaderInvite: document.getElementById("btn-header-invite"),
+  btnGuideToggle: document.getElementById("btn-guide-toggle"),
+  landingModal: document.getElementById("landing-modal"),
+  chkSkipLanding: document.getElementById("chk-skip-landing"),
 };
 
 // ========================================================
@@ -481,6 +484,12 @@ window.addEventListener("DOMContentLoaded", () => {
 
   // Periodic polling for chat messages (every 800ms)
   setInterval(fetchMessages, 800);
+
+  // Option 3 Hybrid Launch: Show minimalist landing modal for direct visitors (not invited via link)
+  const shouldSkipLanding = localStorage.getItem("lanchat_skip_landing") === "true";
+  if (!state.pendingAutoJoin && !shouldSkipLanding) {
+    openLandingModal();
+  }
 });
 
 function toggleSidebar(forceState) {
@@ -518,6 +527,9 @@ function setupEventHandlers() {
   }
 
   // Top Navbar action buttons
+  if (dom.btnGuideToggle) {
+    dom.btnGuideToggle.addEventListener("click", openLandingModal);
+  }
   if (dom.btnInviteToggle) {
     dom.btnInviteToggle.addEventListener("click", openInviteModal);
   }
@@ -1839,6 +1851,70 @@ function triggerNetworkRefresh() {
     channel: null,
   });
 }
+
+// ========================================================
+// Minimalist Landing Page & Offline Guide Modal (Option 3 / Solution A)
+// ========================================================
+function openLandingModal() {
+  if (!dom.landingModal) return;
+  if (dom.chkSkipLanding) {
+    dom.chkSkipLanding.checked = localStorage.getItem("lanchat_skip_landing") === "true";
+  }
+  dom.landingModal.classList.remove("hidden");
+}
+
+function closeLandingModal(savePreference = false) {
+  if (dom.landingModal) {
+    dom.landingModal.classList.add("hidden");
+  }
+  if (savePreference && dom.chkSkipLanding) {
+    if (dom.chkSkipLanding.checked) {
+      localStorage.setItem("lanchat_skip_landing", "true");
+    } else {
+      localStorage.removeItem("lanchat_skip_landing");
+    }
+  }
+}
+
+function launchChatFromLanding() {
+  closeLandingModal(true);
+  if (!state.username) {
+    if (dom.loginModal) dom.loginModal.classList.remove("hidden");
+    if (dom.inputUsername) dom.inputUsername.focus();
+  } else {
+    if (dom.messageInput) dom.messageInput.focus();
+  }
+}
+
+function startPrivateNetworkFlow() {
+  closeLandingModal(true);
+  if (!state.username) {
+    if (dom.loginModal) dom.loginModal.classList.remove("hidden");
+    if (dom.inputUsername) dom.inputUsername.focus();
+    showToastNotification({
+      id: "toast_login_req_" + Date.now(),
+      sender: "🔒 Private Network",
+      message: "Please choose your display name to start or share private rooms.",
+      channel: null,
+    });
+  } else {
+    openInviteModal();
+  }
+}
+
+function scrollToOfflineGuide() {
+  const offlineSection = document.getElementById("landing-offline-section");
+  if (offlineSection) {
+    offlineSection.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+}
+
+// Ensure globally accessible for inline onclick handlers
+window.openLandingModal = openLandingModal;
+window.closeLandingModal = closeLandingModal;
+window.launchChatFromLanding = launchChatFromLanding;
+window.startPrivateNetworkFlow = startPrivateNetworkFlow;
+window.scrollToOfflineGuide = scrollToOfflineGuide;
 
 // ========================================================
 // Room End-to-End Encryption
